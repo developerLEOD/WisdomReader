@@ -61,6 +61,7 @@ export interface BlcLiteralReadingPart {
   totalParts: number;
   contextualTitle?: string;
   chapterName?: string;
+  sessionCoverTitle?: string;
   isSessionCoverPage?: boolean;
   isChapterTitlePage?: boolean;
   chapterEyebrow?: string;

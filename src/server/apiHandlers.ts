@@ -1721,8 +1721,8 @@ ${substanceRule}
 ${grammarInstruction}
 3. CONTEXTUAL ORGANIZATION: Divide the text into cohesive, presentable reading parts averaging ~${safeTargetWords} words each. Break parts at natural contextual/argument/section boundaries rather than mid-thought.
 4. CONTEXTUAL FORMATTING BLOCKS: Within each part, format the text into clean semantic blocks:
-   - 'heading': Major chapter or section title from the text (each 'heading' will be given its own dedicated full chapter title page, so identify real chapter/major section titles accurately!).
-   - 'subheading': Short topic lead-in or thematic subsection title (3–7 words in ${detectedPrimaryLanguage}) inserted wherever a new point, shift in argument, or key subsection begins so readers get clear colored subheadings guiding the flow.
+   - 'heading': Macro chapter or major structural section title ONLY (use SPARINGLY—at most 1–2 across this entire page batch, and ONLY when a genuinely new overarching chapter or primary section begins; NEVER emit a 'heading' for minor paragraph transitions, numbered points, or every reading part, and NEVER repeat the overarching book title or session title as a 'heading'). Each 'heading' starts a new Section Title slide, so keep sections broad and cohesive.
+   - 'subheading': Short topic lead-in, numbered argument header, or thematic subsection title (3–7 words in ${detectedPrimaryLanguage}) inserted inside the reading flow whenever a point or subsection shifts—use 'subheading' rather than 'heading' for routine transitions.
    - 'paragraph': Well-proportioned, readable prose paragraphs (split huge walls of text cleanly at natural thought breaks without dropping content).
    - 'quote': Direct blockquotes, scriptural/Quranic/Hadith citations, poetry couplets, or indented quoted passages.
    - 'list': Enumerated or bulleted points formatted into the 'items' array (set 'text' to a brief intro label or empty string).
@@ -1732,7 +1732,7 @@ ${grammarInstruction}
    - Leave short paragraphs, quotes, and list items unformatted without markers.
    - STRICT RULE: Never wrap the same words in both == and __ (they MUST remain separate and mutually exclusive), never wrap full sentences or long clauses, and NEVER alter the author's literal words!
 6. ACCURATE PAGE NUMBERS: Every block MUST carry the accurate 'pageNumber' from the [Page X] markers below.
-7. STRICT LANGUAGE MATCH FOR 'contextualTitle': Write every part's concise 3–7 word 'contextualTitle' STRICTLY in ${detectedPrimaryLanguage}. If the target output is Urdu, EVERY 'contextualTitle' and 'heading' MUST be written in Urdu script (اردو)—NEVER output English titles for Urdu content!
+7. STRICT LANGUAGE MATCH FOR 'contextualTitle': Write every part's concise 3–7 word 'contextualTitle' (identifying the section theme, never repeating the overall book/session cover title) STRICTLY in ${detectedPrimaryLanguage}. If the target output is Urdu, EVERY 'contextualTitle' and 'heading' MUST be written in Urdu script (اردو)—NEVER output English titles for Urdu content!
 8. WHOLE-BATCH SUMMARY ('batchSummary'): Also provide 'batchSummary' — 1–2 concise sentences summing up all arguments and themes covered across these pages strictly in ${detectedPrimaryLanguage}, plus 'batchSessionTitle' — an overarching session title strictly in ${detectedPrimaryLanguage} covering the whole excerpt batch.
 
 LITERAL PAGES INPUT:

@@ -33,6 +33,7 @@ import {
   getLiteralPartTargetWords,
   injectDiscussionPromptsIntoParts,
   splitSessionLiteralTextIntoParts,
+  titlesDuplicateEachOther,
 } from '../utils/blcBookParser';
 import {
   loadFormattedSessionParts,
@@ -216,19 +217,37 @@ function detectScriptKind(text: string, bookHasUrduContext: boolean): ScriptKind
 
 function resolveDisplayTitleForPart(
   part: BlcLiteralReadingPart,
-  sessionHasUrdu: boolean
+  sessionHasUrdu: boolean,
+  coverTitleFallback?: string
 ): string | undefined {
-  const rawTitle = stripEditorialMarkers(part.contextualTitle || part.chapterName || '').trim();
+  // Cover Folio uses the overarching Cover Title
+  if (part.isSessionCoverPage) {
+    const coverCand = stripEditorialMarkers(
+      part.sessionCoverTitle || part.contextualTitle || coverTitleFallback || ''
+    ).trim();
+    return coverCand || undefined;
+  }
+
+  // Section Title Slides & Body Folios carry ONLY the Section Name (never the Cover Title)
+  const rawTitle = stripEditorialMarkers(
+    part.chapterName || part.chapterCaption || part.contextualTitle || ''
+  ).trim();
+
+  const sanitizedTitle =
+    rawTitle && coverTitleFallback && titlesDuplicateEachOther(rawTitle, coverTitleFallback)
+      ? ''
+      : rawTitle;
+
   const partIsRtl =
     hasRtlScript(part.plainText) || (sessionHasUrdu && hasAnyUrduLetters(part.plainText));
 
   if (!partIsRtl) {
-    return rawTitle || undefined;
+    return sanitizedTitle || undefined;
   }
 
   // When the content is Urdu/Arabic, only show titles that are actually in Urdu/Arabic script
-  if (rawTitle && /[\u0600-\u06FF]/.test(rawTitle)) {
-    return rawTitle;
+  if (sanitizedTitle && /[\u0600-\u06FF]/.test(sanitizedTitle)) {
+    return sanitizedTitle;
   }
 
   // Fallback: look for an Urdu/Arabic heading or subheading inside this folio's blocks
@@ -236,13 +255,22 @@ function resolveDisplayTitleForPart(
     b => (b.type === 'heading' || b.type === 'subheading') && /[\u0600-\u06FF]/.test(b.text)
   );
   if (rtlHeading) {
-    return stripEditorialMarkers(rtlHeading.text).trim();
+    const rtlText = stripEditorialMarkers(rtlHeading.text).trim();
+    if (!coverTitleFallback || !titlesDuplicateEachOther(rtlText, coverTitleFallback)) {
+      return rtlText;
+    }
   }
 
-  // On dedicated chapter title pages, fallback to the first short line of RTL text if needed
-  if (part.isChapterTitlePage || part.isSessionCoverPage) {
-    const firstBlockText = part.blocks?.[0]?.text ? stripEditorialMarkers(part.blocks[0].text).trim() : '';
-    if (firstBlockText && /[\u0600-\u06FF]/.test(firstBlockText)) {
+  // On dedicated section title slides, fallback to the first short line of RTL text if needed
+  if (part.isChapterTitlePage) {
+    const firstBlockText = part.blocks?.[0]?.text
+      ? stripEditorialMarkers(part.blocks[0].text).trim()
+      : '';
+    if (
+      firstBlockText &&
+      /[\u0600-\u06FF]/.test(firstBlockText) &&
+      (!coverTitleFallback || !titlesDuplicateEachOther(firstBlockText, coverTitleFallback))
+    ) {
       return firstBlockText;
     }
   }
@@ -443,7 +471,20 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     );
   }, [rawParts, plan.bookTitle, session.title, session.discussionPrompts, writeContentInUrdu, aiParts, useAiFormatting]);
 
-  // Ensure Folio I is a Whole-Session Summary Cover Slide, chapter titles get dedicated pages, and discussion prompts inject inline
+  const sessionCoverTitle = useMemo(() => {
+    const priorCover = rawParts.find(p => p.isSessionCoverPage);
+    return sessionHasUrduContext
+      ? /[\u0600-\u06FF]/.test(session.title)
+        ? session.title
+        : priorCover?.sessionCoverTitle && /[\u0600-\u06FF]/.test(priorCover.sessionCoverTitle)
+        ? priorCover.sessionCoverTitle
+        : priorCover?.contextualTitle && /[\u0600-\u06FF]/.test(priorCover.contextualTitle)
+        ? priorCover.contextualTitle
+        : plan.bookTitle
+      : session.title;
+  }, [rawParts, sessionHasUrduContext, session.title, plan.bookTitle]);
+
+  // Ensure Folio I is Main Session Cover, followed by Sections (each with a Section Title slide + carried Section header)
   const baseParts: BlcLiteralReadingPart[] = useMemo(() => {
     if (rawParts.length === 0) return [];
 
@@ -452,14 +493,6 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
       /[\u0600-\u06FF]/.test(`${t.topicTitle} ${t.summary}`)
     );
     const useSessionCurriculumData = !sessionHasUrduContext || topicsContainRtl;
-
-    const coverTitle = sessionHasUrduContext
-      ? /[\u0600-\u06FF]/.test(session.title)
-        ? session.title
-        : priorCover?.contextualTitle && /[\u0600-\u06FF]/.test(priorCover.contextualTitle)
-        ? priorCover.contextualTitle
-        : plan.bookTitle
-      : session.title;
 
     const sessionOverview = useSessionCurriculumData
       ? (session.sessionSummary || session.preSessionPrep?.readingMindset || '').trim() ||
@@ -479,7 +512,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
       plan.config.readingSpeedWpm,
       {
         sessionNumber: session.sessionNumber,
-        sessionTitle: coverTitle,
+        sessionTitle: sessionCoverTitle,
         bookTitle: plan.bookTitle,
         author: plan.author,
         startPage: session.startPage,
@@ -503,8 +536,8 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     rawParts,
     plan.config.readingSpeedWpm,
     sessionHasUrduContext,
+    sessionCoverTitle,
     session.sessionNumber,
-    session.title,
     session.sessionSummary,
     session.preSessionPrep,
     session.topics,
@@ -599,7 +632,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
       sessionNumber: session.sessionNumber,
       sessionHasUrduContext,
       wpm: plan.config.readingSpeedWpm,
-      resolveTitle: p => resolveDisplayTitleForPart(p, sessionHasUrduContext),
+      resolveTitle: p => resolveDisplayTitleForPart(p, sessionHasUrduContext, sessionCoverTitle),
     });
 
     setAdaptiveSlides(slides);
@@ -610,6 +643,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     plan.bookTitle,
     session.sessionNumber,
     sessionHasUrduContext,
+    sessionCoverTitle,
     plan.config.readingSpeedWpm,
     fontsReadyTick,
   ]);
@@ -999,7 +1033,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     const sourceList = useBaseParts ? baseParts : parts;
     const p = sourceList[partIndex];
     if (!p) return;
-    const validTitle = resolveDisplayTitleForPart(p, sessionHasUrduContext);
+    const validTitle = resolveDisplayTitleForPart(p, sessionHasUrduContext, sessionCoverTitle);
     const titleSuffix = validTitle ? ` · ${validTitle}` : '';
     const cleanBody = stripEditorialMarkers(p.plainText);
     const formatted = `${plan.bookTitle} — Session ${session.sessionNumber} (Folio ${toRomanNumeral(p.partNumber)}/${toRomanNumeral(p.totalParts)}${titleSuffix})\n\n${cleanBody}`;
@@ -1029,7 +1063,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
 
     const body = baseParts
       .map(p => {
-        const validTitle = resolveDisplayTitleForPart(p, sessionHasUrduContext);
+        const validTitle = resolveDisplayTitleForPart(p, sessionHasUrduContext, sessionCoverTitle);
         return `--- FOLIO ${toRomanNumeral(p.partNumber)} OF ${toRomanNumeral(p.totalParts)}${
           validTitle ? `: ${validTitle}` : ''
         } ---\n\n${stripEditorialMarkers(p.plainText)}`;
@@ -1060,7 +1094,9 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     const titleBlock = blocks.find(b => b.type === 'heading');
 
     const coverTitle =
-      resolveDisplayTitleForPart(part, bookHasUrdu) || titleBlock?.text || session.title;
+      resolveDisplayTitleForPart(part, bookHasUrdu, sessionCoverTitle) ||
+      titleBlock?.text ||
+      sessionCoverTitle;
     const scriptKind = detectScriptKind(coverTitle, bookHasUrdu);
     const isFixedRatio = ratio !== 'auto';
     const isLandscape = ratio === '16:9';
@@ -1392,34 +1428,34 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
   ) => {
     const blocks = part.blocks || [];
     const headingBlock = blocks.find(b => b.type === 'heading') || blocks[0];
-    const subheadingBlock = blocks.find(b => b.type === 'subheading');
-    const headingText =
-      resolveDisplayTitleForPart(part, bookHasUrdu) || headingBlock?.text || part.plainText;
-    const scriptKind = detectScriptKind(headingText, bookHasUrdu);
+    const mainCoverTitle = stripEditorialMarkers(
+      part.sessionCoverTitle || sessionCoverTitle || session.title
+    ).trim();
+    const sectionCaption = stripEditorialMarkers(
+      part.chapterName ||
+        part.chapterCaption ||
+        resolveDisplayTitleForPart(part, bookHasUrdu, mainCoverTitle) ||
+        headingBlock?.text ||
+        part.plainText
+    ).trim();
+
+    const mainScriptKind = detectScriptKind(mainCoverTitle, bookHasUrdu);
+    const captionScript = detectScriptKind(sectionCaption, bookHasUrdu);
     const isFixedRatio = ratio !== 'auto';
     const isLandscape = ratio === '16:9';
 
     const eyebrowText =
       part.chapterEyebrow ||
-      (scriptKind === 'urdu'
-        ? `باب / فصل · صفحہ ${part.startPage}`
-        : scriptKind === 'arabic'
-        ? `فصل · صفحة ${part.startPage}`
-        : `Section Opening · Page ${part.startPage}`);
-
-    const captionText =
-      part.chapterCaption ||
-      (subheadingBlock?.text ? stripEditorialMarkers(subheadingBlock.text) : '') ||
-      (scriptKind === 'urdu'
-        ? `صفحہ ${part.startPage} سے تسلسلِ مطالعہ`
-        : scriptKind === 'arabic'
-        ? `متابعة القراءة من صفحة ${part.startPage}`
-        : `Reading commences on Page ${part.startPage}`);
-    const captionScript = detectScriptKind(captionText, bookHasUrdu);
+      (captionScript === 'urdu'
+        ? `حصہ · صفحہ ${part.startPage}`
+        : captionScript === 'arabic'
+        ? `القسم · صفحة ${part.startPage}`
+        : `Section · Page ${part.startPage}`);
+    const eyebrowScript = detectScriptKind(eyebrowText, bookHasUrdu);
 
     return (
       <div
-        dir={scriptKind === 'latin' ? 'ltr' : 'rtl'}
+        dir={mainScriptKind === 'latin' ? 'ltr' : 'rtl'}
         className={`flex-1 flex flex-col items-center justify-center text-center px-4 ${
           isLandscape
             ? 'py-4 space-y-3'
@@ -1439,11 +1475,12 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
         </div>
 
         <p
+          dir={eyebrowScript === 'latin' ? 'ltr' : 'rtl'}
           style={{ color: palette.accent }}
           className={
-            scriptKind === 'urdu'
-              ? 'font-urdu text-[13.5px] leading-[1.6] tracking-wide'
-              : scriptKind === 'arabic'
+            eyebrowScript === 'urdu'
+              ? 'font-urdu text-[14px] leading-[1.6] tracking-wide'
+              : eyebrowScript === 'arabic'
               ? 'font-arabic text-[13px] leading-[1.6] font-semibold'
               : 'font-serif-body text-[10.5px] uppercase tracking-[0.24em] font-semibold'
           }
@@ -1451,32 +1488,43 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
           {stripEditorialMarkers(eyebrowText)}
         </p>
 
+        {/* Main Title = Session Cover Title */}
         <h5
+          dir={mainScriptKind === 'latin' ? 'ltr' : 'rtl'}
           style={{ color: palette.textPrimary }}
           className={
-            scriptKind === 'urdu'
-              ? `${isLandscape ? 'text-[28px]' : isFixedRatio ? 'text-[34px]' : 'text-[28px] sm:text-[36px]'} font-urdu leading-[1.95] font-normal max-w-md`
-              : scriptKind === 'arabic'
-              ? `${isLandscape ? 'text-[26px]' : isFixedRatio ? 'text-[30px]' : 'text-[26px] sm:text-[32px]'} font-arabic leading-[1.9] font-bold max-w-md`
-              : `${isLandscape ? 'text-[28px]' : isFixedRatio ? 'text-[34px]' : 'text-[28px] sm:text-[36px]'} font-serif-display leading-[1.18] font-semibold tracking-tight max-w-md [text-wrap:balance]`
+            mainScriptKind === 'urdu'
+              ? `${isLandscape ? 'text-[26px]' : isFixedRatio ? 'text-[31px]' : 'text-[26px] sm:text-[34px]'} font-urdu leading-[1.85] font-normal max-w-lg`
+              : mainScriptKind === 'arabic'
+              ? `${isLandscape ? 'text-[24px]' : isFixedRatio ? 'text-[28px]' : 'text-[24px] sm:text-[30px]'} font-arabic leading-[1.8] font-bold max-w-lg`
+              : `${isLandscape ? 'text-[26px]' : isFixedRatio ? 'text-[30px]' : 'text-[26px] sm:text-[34px]'} font-serif-display leading-[1.15] font-semibold tracking-tight max-w-lg [text-wrap:balance]`
           }
         >
-          {stripEditorialMarkers(headingText)}
+          {mainCoverTitle}
         </h5>
 
-        <p
-          dir={captionScript === 'latin' ? 'ltr' : 'rtl'}
-          style={{ color: palette.subheadingColor }}
-          className={
-            captionScript === 'urdu'
-              ? `${isLandscape ? 'text-[17px]' : isFixedRatio ? 'text-[19px]' : 'text-[16.5px] sm:text-[19px]'} font-urdu leading-[1.95] max-w-md line-clamp-2`
-              : captionScript === 'arabic'
-              ? `${isLandscape ? 'text-[15.5px]' : isFixedRatio ? 'text-[17.5px]' : 'text-[15.5px] sm:text-[17.5px]'} font-arabic font-semibold leading-[1.85] max-w-md line-clamp-2`
-              : `${isFixedRatio ? 'text-[13.5px]' : 'text-[13px] sm:text-[14px]'} font-serif-body italic leading-relaxed max-w-md line-clamp-2`
-          }
+        {/* Caption = Section Name (carried onward in reading folio headers) */}
+        <div
+          style={{
+            borderColor: palette.border,
+            backgroundColor: palette.quoteBg,
+          }}
+          className="px-5 py-2 border-y max-w-md"
         >
-          {stripEditorialMarkers(captionText)}
-        </p>
+          <p
+            dir={captionScript === 'latin' ? 'ltr' : 'rtl'}
+            style={{ color: palette.subheadingColor }}
+            className={
+              captionScript === 'urdu'
+                ? `${isLandscape ? 'text-[18px]' : isFixedRatio ? 'text-[20px]' : 'text-[17.5px] sm:text-[20px]'} font-urdu leading-[1.95] line-clamp-2`
+                : captionScript === 'arabic'
+                ? `${isLandscape ? 'text-[16px]' : isFixedRatio ? 'text-[18px]' : 'text-[16px] sm:text-[18px]'} font-arabic font-semibold leading-[1.85] line-clamp-2`
+                : `${isFixedRatio ? 'text-[15px]' : 'text-[14px] sm:text-[15.5px]'} font-serif-display italic font-semibold leading-snug line-clamp-2`
+            }
+          >
+            {sectionCaption}
+          </p>
+        </div>
 
         <div
           style={{ backgroundColor: palette.border }}
@@ -1835,7 +1883,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
 
   const isPartRtl = activePart ? hasRtlScript(activePart.plainText) : false;
   const activeDisplayTitle = activePart
-    ? resolveDisplayTitleForPart(activePart, sessionHasUrduContext)
+    ? resolveDisplayTitleForPart(activePart, sessionHasUrduContext, sessionCoverTitle)
     : undefined;
   const activeTitleScript = activeDisplayTitle
     ? detectScriptKind(activeDisplayTitle, sessionHasUrduContext)
@@ -2201,7 +2249,11 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-none touch-pan-x">
             {parts.map((part, idx) => {
               const isSelected = idx === activePartIdx;
-              const chipTitle = resolveDisplayTitleForPart(part, sessionHasUrduContext);
+              const chipTitle = resolveDisplayTitleForPart(
+                part,
+                sessionHasUrduContext,
+                sessionCoverTitle
+              );
               return (
                 <button
                   key={part.partNumber}
@@ -2220,9 +2272,9 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                     ? ` (${part.slideSplitIndex}/${part.slideSplitTotal})`
                     : ''}
                   {part.isSessionCoverPage
-                    ? ' [Summary]'
+                    ? ' [Cover]'
                     : part.isChapterTitlePage
-                    ? ' [Title]'
+                    ? ' [Section]'
                     : ''}
                   {chipTitle ? ` · ${chipTitle}` : ''}
                 </button>
@@ -2586,7 +2638,11 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
 
             <ol className="space-y-2.5">
               {baseParts.map(part => {
-                const validTitle = resolveDisplayTitleForPart(part, sessionHasUrduContext);
+                const validTitle = resolveDisplayTitleForPart(
+                  part,
+                  sessionHasUrduContext,
+                  sessionCoverTitle
+                );
                 const titleIsUrdu =
                   hasAnyUrduLetters(validTitle || '') ||
                   (hasRtlScript(validTitle || '') && sessionHasUrduContext);
@@ -2612,9 +2668,9 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                       <span className="flex-1 border-b border-dotted border-[#CBBAA3] mx-1" />
                       <span className="text-xs font-serif-body italic text-[#5B4C3E] tabular-nums shrink-0">
                         {part.isSessionCoverPage
-                          ? 'Session Summary'
+                          ? 'Session Cover'
                           : part.isChapterTitlePage
-                          ? 'Chapter Title'
+                          ? 'Section Title'
                           : `Folio ${toRomanNumeral(part.partNumber)}`}
                       </span>
                     </a>
@@ -2627,7 +2683,11 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
           {/* Bound Folios */}
           {baseParts.map((part, idx) => {
             const partRtl = hasRtlScript(part.plainText);
-            const validTitle = resolveDisplayTitleForPart(part, sessionHasUrduContext);
+            const validTitle = resolveDisplayTitleForPart(
+              part,
+              sessionHasUrduContext,
+              sessionCoverTitle
+            );
             const titleScript = validTitle
               ? detectScriptKind(validTitle, sessionHasUrduContext)
               : 'latin';

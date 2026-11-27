@@ -769,30 +769,18 @@ function stripRunningHeadersAndFooters(sessionPages: ParsedPage[]): Map<number, 
   return pageLinesMap;
 }
 
-function isMajorHeadingLine(line: string, atBlockBoundary: boolean = false): boolean {
+function isMajorHeadingLine(line: string, _atBlockBoundary: boolean = false): boolean {
   if (!line || line.length > 78 || line.length < 3) return false;
   if (/^(chapter|chap\.?|part|book|section|discourse|bab|fasl|preface|introduction|prologue|epilogue|conclusion|foreword|باب|فصل|مقدمہ|تمہید|خاتمہ|الباب|الفصل|المقدمة|عنوان)\b/i.test(line)) {
     return true;
   }
-  if (/^(\d+|[IVXLCDM]+)[\.\)]\s+[A-Z\u0600-\u06FF]/.test(line) && !/[.?!,;۔؟]$/.test(line) && line.split(/\s+/).length <= 10) {
-    return true;
-  }
   if (
     line === line.toUpperCase() &&
-    /[A-Z]/.test(line) &&
-    line.split(/\s+/).length <= 10 &&
+    /[A-Z]{2,}/.test(line) &&
+    line.split(/\s+/).length <= 8 &&
     !/[.,;!?]$/.test(line)
   ) {
     return true;
-  }
-  // Standalone short Urdu/Arabic/Title-Case line at a clean paragraph boundary without terminal punctuation
-  if (atBlockBoundary) {
-    const words = line.split(/\s+/).filter(Boolean);
-    const endsWithSentencePunct = /[.?!,;:\u061F\u06D4\u060C\u061B"'”’»)]$/.test(line);
-    const hasUrduOrArabic = /[\u0600-\u06FF]/.test(line);
-    if (!endsWithSentencePunct && hasUrduOrArabic && words.length >= 2 && words.length <= 7 && line.length <= 48) {
-      return true;
-    }
   }
   return false;
 }
@@ -990,6 +978,7 @@ function buildPartFromBlocks(
   options: {
     contextualTitle?: string;
     chapterName?: string;
+    sessionCoverTitle?: string;
     isSessionCoverPage?: boolean;
     isChapterTitlePage?: boolean;
     chapterEyebrow?: string;
@@ -1016,6 +1005,7 @@ function buildPartFromBlocks(
   return {
     contextualTitle: options.contextualTitle,
     chapterName: options.chapterName,
+    sessionCoverTitle: options.sessionCoverTitle,
     isSessionCoverPage: options.isSessionCoverPage,
     isChapterTitlePage: options.isChapterTitlePage,
     chapterEyebrow: options.chapterEyebrow,
@@ -1047,12 +1037,25 @@ export interface SessionCoverMeta {
 }
 
 /**
- * Extracts unique, ordered chapter/section names directly from the current (post-organization) folios.
+ * Extracts unique, ordered section names directly from the current (post-organization) folios.
  */
 export function extractAdaptiveChaptersFromParts(parts: BlcLiteralReadingPart[]): string[] {
   if (!parts || parts.length === 0) return [];
   const seen = new Set<string>();
-  const headings: string[] = [];
+  const sectionTitles: string[] = [];
+
+  for (const part of parts) {
+    if (part.isSessionCoverPage) continue;
+    const candidate = (part.chapterName || '').replace(/:$/, '').trim();
+    if (candidate && !seen.has(candidate.toLowerCase())) {
+      seen.add(candidate.toLowerCase());
+      sectionTitles.push(candidate);
+    }
+  }
+
+  if (sectionTitles.length > 0) {
+    return sectionTitles;
+  }
 
   for (const part of parts) {
     if (part.isSessionCoverPage) continue;
@@ -1061,35 +1064,15 @@ export function extractAdaptiveChaptersFromParts(parts: BlcLiteralReadingPart[])
         const clean = block.text.replace(/:$/, '').trim();
         if (clean && !seen.has(clean.toLowerCase())) {
           seen.add(clean.toLowerCase());
-          headings.push(clean);
+          sectionTitles.push(clean);
         }
       }
     }
   }
 
-  if (headings.length > 0) {
-    return headings;
-  }
-
-  // Fallback: collect distinct organized section/contextual titles when no explicit 'heading' blocks exist
-  const sectionTitles: string[] = [];
-  for (const part of parts) {
-    if (part.isSessionCoverPage) continue;
-    const candidate = (part.chapterName || part.contextualTitle || '').replace(/:$/, '').trim();
-    if (candidate && !seen.has(candidate.toLowerCase())) {
-      seen.add(candidate.toLowerCase());
-      sectionTitles.push(candidate);
-      if (sectionTitles.length >= 4) break;
-    }
-  }
   return sectionTitles;
 }
 
-/**
- * Ensures every session starts with a dedicated 1st-page Session Cover Graphic,
- * every major chapter heading ('heading' block) occupies its own dedicated full Chapter Title Folio,
- * and every folio carries an adaptive chapterName aligned to the latest organized headings.
- */
 function truncateToSentenceLimit(text: string, maxChars: number = 175): string {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (!clean) return '';
@@ -1113,7 +1096,7 @@ function normalizeTitleForComparison(title: string): string {
     .trim();
 }
 
-function titlesDuplicateEachOther(a: string, b: string): boolean {
+export function titlesDuplicateEachOther(a: string, b: string): boolean {
   const normA = normalizeTitleForComparison(a);
   const normB = normalizeTitleForComparison(b);
   if (!normA || !normB) return false;
@@ -1128,6 +1111,39 @@ function titlesDuplicateEachOther(a: string, b: string): boolean {
   return overlap >= 0.72;
 }
 
+function toUrduSectionWord(num: number): string {
+  const ordinals = ['اول', 'دوم', 'سوم', 'چہارم', 'پنجم', 'ششم', 'ہفتم', 'ہشتم', 'نہم', 'دہم'];
+  if (num >= 1 && num <= ordinals.length) return ordinals[num - 1];
+  return String(num);
+}
+
+function isDistinctFromCoverOrBook(
+  candidate: string,
+  coverTitle: string,
+  bookTitle: string
+): boolean {
+  const clean = stripEditorialMarkers(candidate || '').replace(/:$/, '').trim();
+  if (!clean) return false;
+  if (coverTitle && titlesDuplicateEachOther(clean, coverTitle)) return false;
+  if (bookTitle && titlesDuplicateEachOther(clean, bookTitle)) return false;
+  return true;
+}
+
+function cleanSectionLabelCandidate(candidate?: string): string {
+  return stripEditorialMarkers(candidate || '')
+    .replace(/\s*\(Part\s+\d+\/\d+\)\s*$/i, '')
+    .replace(/:$/, '')
+    .trim();
+}
+
+/**
+ * Structures every session uniformly:
+ * 1. Folio I: Dedicated Session Cover Graphic (with the overarching Cover Title).
+ * 2. Divided into Sections:
+ *    - Each Section starts with a Section Title Slide (Main Title = Cover Title, Caption = Section Name).
+ *    - Every subsequent body reading folio in that Section carries ONLY the Section Name in its header
+ *      until the next Section Title Slide (Cover Title never appears in body folio headers).
+ */
 export function expandPartsWithDedicatedChapterPages(
   rawParts: BlcLiteralReadingPart[],
   readingSpeedWpm: number = 200,
@@ -1141,9 +1157,37 @@ export function expandPartsWithDedicatedChapterPages(
       : undefined;
 
   const priorCover = rawParts.find(p => p.isSessionCoverPage);
+  const coverTitle = stripEditorialMarkers(
+    coverMeta?.sessionTitle || priorCover?.sessionCoverTitle || priorCover?.contextualTitle || ''
+  ).trim();
+  const bookTitle = stripEditorialMarkers(coverMeta?.bookTitle || '').trim();
+
   const sourceParts = rawParts.filter(p => !p.isSessionCoverPage);
-  const expanded: Array<Omit<BlcLiteralReadingPart, 'partNumber' | 'totalParts'>> = [];
-  let activeChapterName = '';
+
+  interface SectionDraft {
+    rawName: string;
+    startPage: number;
+    isAiOrganized: boolean;
+    bodyParts: Array<Omit<BlcLiteralReadingPart, 'partNumber' | 'totalParts'>>;
+    candidateTitles: string[];
+  }
+
+  const sections: SectionDraft[] = [];
+  let currentSection: SectionDraft | null = null;
+
+  const ensureSection = (startPage: number, initialName: string, isAiOrganized: boolean) => {
+    if (!currentSection) {
+      currentSection = {
+        rawName: initialName,
+        startPage,
+        isAiOrganized,
+        bodyParts: [],
+        candidateTitles: [],
+      };
+      sections.push(currentSection);
+    }
+    return currentSection;
+  };
 
   for (const part of sourceParts) {
     const blocks: BlcLiteralBlock[] =
@@ -1157,155 +1201,365 @@ export function expandPartsWithDedicatedChapterPages(
 
     if (blocks.length === 0) continue;
 
-    let buffer: BlcLiteralBlock[] = [];
-    let i = 0;
+    // Handle previously generated Chapter/Section Title slides idempotently
+    const hasOnlyHeadingBlocks =
+      part.isChapterTitlePage &&
+      blocks.every(b => b.type === 'heading' || b.type === 'subheading');
 
-    while (i < blocks.length) {
-      const b = blocks[i];
-      if (b.type === 'heading') {
-        if (buffer.length > 0) {
-          const bufferSub = buffer.find(x => x.type === 'subheading')?.text.replace(/:$/, '').trim();
-          const adaptiveTitle =
-            (part.contextualTitle && part.contextualTitle.trim()) || bufferSub || activeChapterName || undefined;
-          expanded.push(
-            buildPartFromBlocks(buffer, readingSpeedWpm, {
-              contextualTitle: adaptiveTitle,
-              chapterName: activeChapterName || adaptiveTitle,
-              isChapterTitlePage: false,
-              isAiOrganized: part.isAiOrganized,
-            })
-          );
-          buffer = [];
+    if (hasOnlyHeadingBlocks) {
+      const headingBlock = blocks.find(b => b.type === 'heading');
+      const subBlock = blocks.find(b => b.type === 'subheading');
+      const candidateName = cleanSectionLabelCandidate(
+        part.chapterName || headingBlock?.text || part.contextualTitle
+      );
+      const distinctSub = subBlock ? cleanSectionLabelCandidate(subBlock.text) : '';
+      const resolvedRaw = isDistinctFromCoverOrBook(candidateName, coverTitle, bookTitle)
+        ? candidateName
+        : isDistinctFromCoverOrBook(distinctSub, coverTitle, bookTitle)
+        ? distinctSub
+        : '';
+
+      if (currentSection && currentSection.bodyParts.length === 0) {
+        if (resolvedRaw) {
+          currentSection.rawName = resolvedRaw;
         }
-
-        const headingClean = stripEditorialMarkers(b.text).replace(/:$/, '').trim();
-        let eyebrowOverride: string | undefined;
-
-        // If the immediately preceding expanded folio is also a chapter title page with no prose in between,
-        // coalesce them into one chapter title folio (promoting the outer title as eyebrow) rather than two empty title slides.
-        const prevExpanded = expanded[expanded.length - 1];
-        if (prevExpanded && prevExpanded.isChapterTitlePage) {
-          eyebrowOverride = prevExpanded.chapterName || prevExpanded.contextualTitle;
-          expanded.pop();
-        }
-
-        activeChapterName = headingClean;
-        const titleBlocks: BlcLiteralBlock[] = [b];
-        let explicitCaption: string | undefined;
-        if (i + 1 < blocks.length && blocks[i + 1].type === 'subheading') {
-          titleBlocks.push(blocks[i + 1]);
-          explicitCaption = stripEditorialMarkers(blocks[i + 1].text).replace(/:$/, '').trim();
-          i++;
-        }
-
-        expanded.push(
-          buildPartFromBlocks(titleBlocks, readingSpeedWpm, {
-            contextualTitle: activeChapterName,
-            chapterName: activeChapterName,
-            isChapterTitlePage: true,
-            chapterEyebrow: eyebrowOverride || part.chapterEyebrow,
-            chapterCaption: explicitCaption || part.chapterCaption,
-            isAiOrganized: part.isAiOrganized,
-          })
-        );
+        currentSection.startPage = part.startPage;
       } else {
-        buffer.push(b);
+        currentSection = {
+          rawName: resolvedRaw,
+          startPage: part.startPage,
+          isAiOrganized: Boolean(part.isAiOrganized),
+          bodyParts: [],
+          candidateTitles: distinctSub ? [distinctSub] : [],
+        };
+        sections.push(currentSection);
       }
-      i++;
+      continue;
     }
 
-    if (buffer.length > 0) {
-      const bufferSub = buffer.find(x => x.type === 'subheading')?.text.replace(/:$/, '').trim();
-      const rawCtx = (part.contextualTitle || '').trim();
-      const adaptiveTitle =
-        rawCtx && (!activeChapterName || rawCtx !== activeChapterName || part.isAiOrganized)
-          ? rawCtx
-          : bufferSub || activeChapterName || rawCtx || undefined;
+    let buffer: BlcLiteralBlock[] = [];
 
-      expanded.push(
+    const flushBufferIntoSection = () => {
+      if (buffer.length === 0) return;
+      const firstSub = buffer.find(x => x.type === 'subheading')?.text;
+      const partCtx = part.contextualTitle || part.chapterName;
+      const fallbackName = [firstSub, partCtx]
+        .map(c => cleanSectionLabelCandidate(c))
+        .find(c => isDistinctFromCoverOrBook(c, coverTitle, bookTitle)) || '';
+
+      const targetSec = ensureSection(buffer[0].pageNumber, fallbackName, Boolean(part.isAiOrganized));
+      if (!targetSec.rawName && fallbackName) {
+        targetSec.rawName = fallbackName;
+      }
+      for (const cand of [firstSub, partCtx]) {
+        const cleaned = cleanSectionLabelCandidate(cand);
+        if (cleaned) targetSec.candidateTitles.push(cleaned);
+      }
+      if (part.isAiOrganized) {
+        targetSec.isAiOrganized = true;
+      }
+
+      targetSec.bodyParts.push(
         buildPartFromBlocks(buffer, readingSpeedWpm, {
-          contextualTitle: adaptiveTitle,
-          chapterName: activeChapterName || adaptiveTitle,
+          contextualTitle: targetSec.rawName || undefined,
+          chapterName: targetSec.rawName || undefined,
           isChapterTitlePage: false,
           isAiOrganized: part.isAiOrganized,
         })
       );
-    }
-  }
+      buffer = [];
+    };
 
-  // Deduplicate Folio II if it is a Chapter Title Folio that repeats the Session Cover or Book Title verbatim
-  let promotedSubtitleFromFirstHeading: string | undefined;
-  if (coverMeta && expanded.length > 1 && expanded[0].isChapterTitlePage) {
-    const firstHeadingTitle = expanded[0].chapterName || expanded[0].contextualTitle || '';
-    if (
-      titlesDuplicateEachOther(firstHeadingTitle, coverMeta.sessionTitle) ||
-      titlesDuplicateEachOther(firstHeadingTitle, coverMeta.bookTitle)
-    ) {
-      const sub = expanded[0].blocks.find(b => b.type === 'subheading')?.text || expanded[0].chapterCaption;
-      if (sub) {
-        promotedSubtitleFromFirstHeading = stripEditorialMarkers(sub).trim();
-      }
-      expanded.shift();
-    }
-  }
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
+      if (b.type === 'heading') {
+        flushBufferIntoSection();
 
-  // Guarantee uniform, consistent eyebrow & thematic caption on EVERY dedicated Chapter Title Folio
-  let chapterOrdinal = 0;
-  for (let idx = 0; idx < expanded.length; idx++) {
-    const item = expanded[idx];
-    if (!item.isChapterTitlePage) continue;
-    chapterOrdinal++;
+        let headingClean = cleanSectionLabelCandidate(b.text);
+        if (!isDistinctFromCoverOrBook(headingClean, coverTitle, bookTitle)) {
+          const nextSub =
+            i + 1 < blocks.length && blocks[i + 1].type === 'subheading'
+              ? cleanSectionLabelCandidate(blocks[i + 1].text)
+              : '';
+          if (isDistinctFromCoverOrBook(nextSub, coverTitle, bookTitle)) {
+            headingClean = nextSub;
+          } else {
+            const partCtx = cleanSectionLabelCandidate(part.contextualTitle);
+            headingClean = isDistinctFromCoverOrBook(partCtx, coverTitle, bookTitle) ? partCtx : '';
+          }
+        }
 
-    const headingText = item.chapterName || item.contextualTitle || item.plainText;
-    const isRtlHeading = /[\u0600-\u06FF]/.test(headingText);
-    const isUrduHeading = /[\u0679\u067E\u0686\u0688\u0691\u0698\u06A9\u06AF\u06BA\u06BE\u06C1-\u06C3\u06CC\u06D2\u06D3\u06D4]/.test(
-      headingText
-    );
-
-    if (!item.chapterEyebrow) {
-      item.chapterEyebrow = isUrduHeading
-        ? `باب / فصل · صفحہ ${item.startPage}`
-        : isRtlHeading
-        ? `فصل · صفحة ${item.startPage}`
-        : `Section ${toRomanSimple(chapterOrdinal)} · Page ${item.startPage}`;
-    }
-
-    if (!item.chapterCaption) {
-      const subInSelf = item.blocks.find(b => b.type === 'subheading')?.text;
-      if (subInSelf && subInSelf.trim()) {
-        item.chapterCaption = stripEditorialMarkers(subInSelf).replace(/:$/, '').trim();
+        // Coalesce consecutive empty headings into one clean Section Title Slide
+        if (currentSection && currentSection.bodyParts.length === 0) {
+          if (headingClean) {
+            currentSection.rawName = headingClean;
+          }
+          currentSection.startPage = b.pageNumber;
+        } else {
+          currentSection = {
+            rawName: headingClean,
+            startPage: b.pageNumber,
+            isAiOrganized: Boolean(part.isAiOrganized),
+            bodyParts: [],
+            candidateTitles: [],
+          };
+          sections.push(currentSection);
+        }
       } else {
-        // Look ahead to the next prose folio to synthesize a consistent 1-line thematic preview caption
-        const nextProse = expanded.slice(idx + 1).find(p => !p.isChapterTitlePage && p.blocks.length > 0);
-        const leadBlock =
-          nextProse?.blocks.find(b => b.type === 'subheading') ||
-          nextProse?.blocks.find(b => b.type === 'paragraph' || b.type === 'quote');
-        const rawLead = leadBlock ? stripEditorialMarkers(leadBlock.text).trim() : '';
-        if (rawLead) {
-          item.chapterCaption = truncateToSentenceLimit(rawLead, 110);
-        } else if (coverMeta?.sessionPillars && coverMeta.sessionPillars.length > 0) {
-          item.chapterCaption = truncateToSentenceLimit(
-            coverMeta.sessionPillars[0].summary || coverMeta.sessionPillars[0].title,
-            110
+        buffer.push(b);
+      }
+    }
+
+    flushBufferIntoSection();
+  }
+
+  const rawNonEmptySections = sections.filter(s => s.bodyParts.length > 0);
+
+  const getSectionWordCount = (sec: SectionDraft): number =>
+    sec.bodyParts.reduce((acc, bp) => acc + bp.wordCount, 0);
+
+  const getDistinctLabel = (sec: SectionDraft): string =>
+    [sec.rawName, ...sec.candidateTitles]
+      .map(c => cleanSectionLabelCandidate(c))
+      .find(c => isDistinctFromCoverOrBook(c, coverTitle, bookTitle)) || '';
+
+  const prependSubheadingIfDistinct = (
+    bp: Omit<BlcLiteralReadingPart, 'partNumber' | 'totalParts'>,
+    label: string,
+    pageNum: number
+  ): Omit<BlcLiteralReadingPart, 'partNumber' | 'totalParts'> => {
+    const clean = cleanSectionLabelCandidate(label);
+    if (!clean || !isDistinctFromCoverOrBook(clean, coverTitle, bookTitle)) return bp;
+    const existingBlocks = bp.blocks || [];
+    const firstBlock = existingBlocks[0];
+    if (
+      firstBlock &&
+      (firstBlock.type === 'subheading' || firstBlock.type === 'heading') &&
+      titlesDuplicateEachOther(firstBlock.text, clean)
+    ) {
+      return bp;
+    }
+    const subBlock: BlcLiteralBlock = {
+      type: 'subheading',
+      pageNumber: firstBlock?.pageNumber || pageNum,
+      text: clean,
+    };
+    return buildPartFromBlocks([subBlock, ...existingBlocks], readingSpeedWpm, {
+      contextualTitle: bp.contextualTitle,
+      chapterName: bp.chapterName,
+      isChapterTitlePage: false,
+      isAiOrganized: bp.isAiOrganized,
+    });
+  };
+
+  const mergeAdjacentSections = (left: SectionDraft, right: SectionDraft): SectionDraft => {
+    const leftWords = getSectionWordCount(left);
+    const leftLabel = getDistinctLabel(left);
+    const rightLabel = getDistinctLabel(right);
+
+    const adoptRightAsPrimary = !left.rawName && leftWords < 140 && Boolean(rightLabel);
+    const mergedRawName = adoptRightAsPrimary
+      ? rightLabel
+      : left.rawName || leftLabel || rightLabel;
+
+    let updatedRightParts = right.bodyParts;
+    if (
+      !adoptRightAsPrimary &&
+      rightLabel &&
+      (!mergedRawName || !titlesDuplicateEachOther(rightLabel, mergedRawName)) &&
+      updatedRightParts.length > 0
+    ) {
+      updatedRightParts = [
+        prependSubheadingIfDistinct(updatedRightParts[0], rightLabel, right.startPage),
+        ...updatedRightParts.slice(1),
+      ];
+    }
+
+    return {
+      rawName: mergedRawName,
+      startPage: left.startPage,
+      isAiOrganized: left.isAiOrganized || right.isAiOrganized,
+      bodyParts: [...left.bodyParts, ...updatedRightParts],
+      candidateTitles: [...left.candidateTitles, ...right.candidateTitles],
+    };
+  };
+
+  // Consolidate fragmented or duplicate sections so each session has a balanced, readable number of macro sections
+  let nonEmptySections: SectionDraft[] = [...rawNonEmptySections];
+
+  if (nonEmptySections.length > 1) {
+    // 1. Merge adjacent sections whose resolved labels duplicate each other
+    const deduped: SectionDraft[] = [nonEmptySections[0]];
+    for (let i = 1; i < nonEmptySections.length; i++) {
+      const prev = deduped[deduped.length - 1];
+      const curr = nonEmptySections[i];
+      const prevLabel = getDistinctLabel(prev);
+      const currLabel = getDistinctLabel(curr);
+      if (prevLabel && currLabel && titlesDuplicateEachOther(prevLabel, currLabel)) {
+        deduped[deduped.length - 1] = mergeAdjacentSections(prev, curr);
+      } else {
+        deduped.push(curr);
+      }
+    }
+    nonEmptySections = deduped;
+
+    // 2. Fold tiny 1-part micro-sections (< 180 words) into their smaller neighbor when > 2 sections exist
+    while (nonEmptySections.length > 2) {
+      const tinyIdx = nonEmptySections.findIndex(
+        s => s.bodyParts.length === 1 && getSectionWordCount(s) < 180
+      );
+      if (tinyIdx === -1) break;
+
+      if (tinyIdx === 0) {
+        nonEmptySections.splice(0, 2, mergeAdjacentSections(nonEmptySections[0], nonEmptySections[1]));
+      } else if (tinyIdx === nonEmptySections.length - 1) {
+        nonEmptySections.splice(
+          tinyIdx - 1,
+          2,
+          mergeAdjacentSections(nonEmptySections[tinyIdx - 1], nonEmptySections[tinyIdx])
+        );
+      } else {
+        const prevWords = getSectionWordCount(nonEmptySections[tinyIdx - 1]);
+        const nextWords = getSectionWordCount(nonEmptySections[tinyIdx + 1]);
+        if (prevWords <= nextWords) {
+          nonEmptySections.splice(
+            tinyIdx - 1,
+            2,
+            mergeAdjacentSections(nonEmptySections[tinyIdx - 1], nonEmptySections[tinyIdx])
+          );
+        } else {
+          nonEmptySections.splice(
+            tinyIdx,
+            2,
+            mergeAdjacentSections(nonEmptySections[tinyIdx], nonEmptySections[tinyIdx + 1])
           );
         }
       }
     }
+
+    // 3. Enforce balanced macro section cap based on session volume (1–5 sections max)
+    const totalBodyWords = nonEmptySections.reduce((acc, s) => acc + getSectionWordCount(s), 0);
+    const totalBodyParts = nonEmptySections.reduce((acc, s) => acc + s.bodyParts.length, 0);
+    const maxSections =
+      totalBodyParts <= 2
+        ? 1
+        : totalBodyWords <= 900
+        ? 2
+        : totalBodyWords <= 2400
+        ? 3
+        : totalBodyWords <= 4200
+        ? 4
+        : 5;
+
+    while (nonEmptySections.length > maxSections && nonEmptySections.length > 1) {
+      let bestPairIdx = 0;
+      let smallestCombined = Infinity;
+      for (let i = 0; i < nonEmptySections.length - 1; i++) {
+        const combined =
+          getSectionWordCount(nonEmptySections[i]) + getSectionWordCount(nonEmptySections[i + 1]);
+        if (combined < smallestCombined) {
+          smallestCombined = combined;
+          bestPairIdx = i;
+        }
+      }
+      nonEmptySections.splice(
+        bestPairIdx,
+        2,
+        mergeAdjacentSections(nonEmptySections[bestPairIdx], nonEmptySections[bestPairIdx + 1])
+      );
+    }
   }
 
-  // Inject Folio I as a Whole-Session Summary Cover Folio summing up ALL topics & chapters of the session
-  if (coverMeta && expanded.length > 0) {
-    const discoveredHeadings = expanded
-      .filter(p => p.isChapterTitlePage && p.chapterName)
-      .map(p => p.chapterName as string);
-    const adaptiveCoverChapters =
-      discoveredHeadings.length > 0
-        ? Array.from(new Set(discoveredHeadings))
-        : coverMeta.chaptersCovered && coverMeta.chaptersCovered.length > 0
-        ? coverMeta.chaptersCovered
-        : [];
+  const expanded: Array<Omit<BlcLiteralReadingPart, 'partNumber' | 'totalParts'>> = [];
 
-    // Build fallback section-by-section pillars spanning the ENTIRE session if sessionPillars were not supplied
+  // Resolve guaranteed distinct Section Name for every section & emit Section Title Slide + Body Folios
+  nonEmptySections.forEach((sec, idx) => {
+    const sectionOrdinal = idx + 1;
+    const sampleText = `${sec.rawName} ${sec.bodyParts.map(bp => bp.plainText).slice(0, 2).join(' ')}`;
+    const isRtl = /[\u0600-\u06FF]/.test(sampleText);
+    const isUrdu = /[\u0679\u067E\u0686\u0688\u0691\u0698\u06A9\u06AF\u06BA\u06BE\u06C1-\u06C3\u06CC\u06D2\u06D3\u06D4]/.test(
+      sampleText
+    );
+
+    const pillarCandidate = cleanSectionLabelCandidate(coverMeta?.sessionPillars?.[idx]?.title);
+    const coveredCandidate = cleanSectionLabelCandidate(coverMeta?.chaptersCovered?.[idx]);
+
+    const pool = [
+      sec.rawName,
+      ...sec.candidateTitles,
+      pillarCandidate,
+      coveredCandidate,
+    ];
+
+    let resolvedSectionName =
+      pool.find(cand => {
+        if (!isDistinctFromCoverOrBook(cand, coverTitle, bookTitle)) return false;
+        if (isRtl && !/[\u0600-\u06FF]/.test(cand)) return false;
+        return true;
+      }) || '';
+
+    if (!resolvedSectionName) {
+      resolvedSectionName = isUrdu
+        ? `حصہ ${toUrduSectionWord(sectionOrdinal)}`
+        : isRtl
+        ? `القسم ${sectionOrdinal}`
+        : `Section ${toRomanSimple(sectionOrdinal)}`;
+    }
+
+    const sectionEyebrow = isUrdu
+      ? `حصہ ${toUrduSectionWord(sectionOrdinal)} · صفحہ ${sec.startPage}`
+      : isRtl
+      ? `القسم ${sectionOrdinal} · صفحة ${sec.startPage}`
+      : `Section ${toRomanSimple(sectionOrdinal)} · Page ${sec.startPage}`;
+
+    // Emit Section Title Slide: Main Title = Cover Title, Caption = Section Name
+    if (coverMeta) {
+      const sectionTitleSlide = buildPartFromBlocks(
+        [
+          {
+            type: 'heading',
+            pageNumber: sec.startPage,
+            text: resolvedSectionName,
+          },
+        ],
+        readingSpeedWpm,
+        {
+          contextualTitle: resolvedSectionName,
+          chapterName: resolvedSectionName,
+          sessionCoverTitle: coverTitle || undefined,
+          isSessionCoverPage: false,
+          isChapterTitlePage: true,
+          chapterEyebrow: sectionEyebrow,
+          chapterCaption: resolvedSectionName,
+          isAiOrganized: sec.isAiOrganized,
+        }
+      );
+      expanded.push(sectionTitleSlide);
+    }
+
+    // Carry the exact Section Name into every body reading folio of this Section (Cover Title omitted)
+    for (const bp of sec.bodyParts) {
+      expanded.push({
+        ...bp,
+        chapterName: resolvedSectionName,
+        contextualTitle: resolvedSectionName,
+        sessionCoverTitle: undefined,
+        isSessionCoverPage: false,
+        isChapterTitlePage: false,
+      });
+    }
+  });
+
+  // Inject Folio I as Main Session Cover (summing up the whole session)
+  if (coverMeta && expanded.length > 0) {
+    const discoveredSections = Array.from(
+      new Set(
+        expanded
+          .filter(p => p.isChapterTitlePage && p.chapterName)
+          .map(p => p.chapterName as string)
+      )
+    );
+
     let wholeSessionPillars: BlcSessionPillar[] = [];
     if (coverMeta.sessionPillars && coverMeta.sessionPillars.length > 0) {
       wholeSessionPillars = coverMeta.sessionPillars
@@ -1319,39 +1573,16 @@ export function expandPartsWithDedicatedChapterPages(
       wholeSessionPillars = priorCover.sessionPillars.slice(0, 4);
     }
 
-    if (wholeSessionPillars.length === 0) {
-      const seenTitles = new Set<string>();
-      const candidateParts = expanded.filter(p => !p.isChapterTitlePage && p.blocks.length > 0);
-      for (const p of candidateParts) {
-        const title = (p.contextualTitle || p.chapterName || '').trim();
-        const key = title.toLowerCase();
-        if (!title || seenTitles.has(key)) continue;
-        seenTitles.add(key);
-        const firstProse =
-          p.blocks.find(b => b.type === 'paragraph' || b.type === 'quote')?.text || '';
-        wholeSessionPillars.push({
-          title,
-          summary: truncateToSentenceLimit(firstProse, 130),
-        });
-        if (wholeSessionPillars.length >= 4) break;
-      }
-      // If still under 2 pillars, include discovered chapter headings
-      if (wholeSessionPillars.length < 2 && adaptiveCoverChapters.length > 0) {
-        for (const ch of adaptiveCoverChapters) {
-          const cleanCh = ch.trim();
-          if (cleanCh && !seenTitles.has(cleanCh.toLowerCase())) {
-            seenTitles.add(cleanCh.toLowerCase());
-            wholeSessionPillars.push({ title: cleanCh, summary: '' });
-            if (wholeSessionPillars.length >= 4) break;
-          }
-        }
-      }
+    if (wholeSessionPillars.length === 0 && discoveredSections.length > 0) {
+      wholeSessionPillars = discoveredSections.slice(0, 4).map(secName => ({
+        title: secName,
+        summary: '',
+      }));
     }
 
     let wholeSessionOverview = (
       coverMeta.sessionOverview ||
       priorCover?.sessionOverview ||
-      promotedSubtitleFromFirstHeading ||
       ''
     ).trim();
 
@@ -1367,14 +1598,14 @@ export function expandPartsWithDedicatedChapterPages(
       {
         type: 'heading',
         pageNumber: coverMeta.startPage,
-        text: coverMeta.sessionTitle,
+        text: coverTitle || coverMeta.sessionTitle,
       },
-      ...(adaptiveCoverChapters.length > 0
+      ...(discoveredSections.length > 0
         ? [
             {
               type: 'subheading' as const,
               pageNumber: coverMeta.startPage,
-              text: adaptiveCoverChapters.slice(0, 4).join(' · '),
+              text: discoveredSections.slice(0, 4).join(' · '),
             },
           ]
         : []),
@@ -1390,11 +1621,11 @@ export function expandPartsWithDedicatedChapterPages(
     ];
 
     const builtCover = buildPartFromBlocks(coverBlocks, readingSpeedWpm, {
-      contextualTitle: coverMeta.sessionTitle,
-      chapterName: adaptiveCoverChapters.join(' · ') || coverMeta.sessionTitle,
+      contextualTitle: coverTitle || coverMeta.sessionTitle,
+      chapterName: discoveredSections.join(' · ') || coverTitle || coverMeta.sessionTitle,
+      sessionCoverTitle: coverTitle || coverMeta.sessionTitle,
       isSessionCoverPage: true,
       isChapterTitlePage: false,
-      chapterCaption: promotedSubtitleFromFirstHeading,
       sessionOverview: wholeSessionOverview || undefined,
       sessionPillars: wholeSessionPillars.length > 0 ? wholeSessionPillars : undefined,
       isAiOrganized: expanded.some(p => p.isAiOrganized),
@@ -1512,20 +1743,13 @@ export function splitSessionLiteralTextIntoParts(
   for (let i = 0; i < allBlocks.length; i++) {
     const { block, words } = allBlocks[i];
 
-    // Give every major heading its own dedicated full Chapter Title Page
+    // Give every major heading its own dedicated full Section Title Page
     if (block.type === 'heading') {
       flushPart();
-      const titleBlocks: BlcLiteralBlock[] = [block];
-      let titleWords = words;
-      if (i + 1 < allBlocks.length && allBlocks[i + 1].block.type === 'subheading') {
-        titleBlocks.push(allBlocks[i + 1].block);
-        titleWords += allBlocks[i + 1].words;
-        i++;
-      }
       lastSeenHeading = block.text.replace(/:$/, '');
       rawParts.push({
-        blocks: titleBlocks,
-        wordCount: titleWords,
+        blocks: [block],
+        wordCount: words,
         contextualTitle: lastSeenHeading,
         isChapterTitlePage: true,
       });
