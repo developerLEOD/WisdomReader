@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAllowedBlcUser() {
+      return request.auth != null 
+        && request.auth.token.email != null
+        && request.auth.token.email in [
+          'araizhasan00@gmail.com',
+          'developertwl@gmail.com',
+          'raotashfeen6@gmail.com',
+          'iqradreamer@gmail.com'
+        ];
+    }
+
+    match /blcPlans/{planId} {
+      allow read, write: if isAllowedBlcUser();
+    }
+
+    match /blcCachedPages/{cacheId} {
+      allow read, write: if isAllowedBlcUser();
+    }
+  }
+}

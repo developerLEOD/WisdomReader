@@ -1,0 +1,6 @@
+{
+  "name": "Wisdom Reader by The Wisdom Lounge",
+  "description": "An editorial book summarizer and study studio for classical works and long texts, built for The Wisdom Lounge learning community.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

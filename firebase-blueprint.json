@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "BlcPlanRecord": {
+      "name": "BlcPlanRecord",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "circleName": { "type": "string", "maxLength": 150 },
+        "bookTitle": { "type": "string", "maxLength": 200 },
+        "author": { "type": "string", "maxLength": 100 },
+        "fileName": { "type": "string", "maxLength": 150 },
+        "totalPages": { "type": "integer" },
+        "totalWords": { "type": "integer" },
+        "overallSummary": { "type": "string", "maxLength": 5000 },
+        "learningArcOutcomes": { "type": "array", "items": { "type": "string" } },
+        "config": { "type": "object" },
+        "sessions": { "type": "array" },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["id", "circleName", "bookTitle", "sessions", "createdAt"]
+    },
+    "BlcCachedPages": {
+      "name": "BlcCachedPages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "planId": { "type": "string" },
+        "pages": { "type": "array" },
+        "formattedParts": { "type": "object" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["id", "planId", "pages", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "paths": {
+      "blcPlans/{planId}": {
+        "schema": "BlcPlanRecord",
+        "read": "isAllowedBlcUser()",
+        "write": "isAllowedBlcUser()"
+      },
+      "blcCachedPages/{cacheId}": {
+        "schema": "BlcCachedPages",
+        "read": "isAllowedBlcUser()",
+        "write": "isAllowedBlcUser()"
+      }
+    }
+  }
+}
