@@ -31,6 +31,7 @@ import {
 } from '../utils/twlCircleAttribution';
 import { useLanguage } from '../context/LanguageContext';
 import { translateParagraphToUrdu } from '../utils/urduContentTranslator';
+import { fetchWithRetry } from '../utils/fetchWithRetry';
 
 interface ModernRemediesViewProps {
   book: BookAnalysis;
@@ -244,7 +245,7 @@ export const ModernRemediesView: React.FC<ModernRemediesViewProps> = ({ book, on
     const targetTitle = remedyBookTitle.trim() || book.title;
 
     try {
-      const response = await fetch('/api/extract-remedies', {
+      const response = await fetchWithRetry('/api/extract-remedies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

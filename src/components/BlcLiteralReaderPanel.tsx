@@ -40,6 +40,7 @@ import {
   saveFormattedSessionParts,
 } from '../utils/blcLiteralStorage';
 import { getBookFontEmbedCss } from '../utils/fontEmbedHelper';
+import { dataUrlToBlob, fetchWithRetry } from '../utils/fetchWithRetry';
 import {
   renderFormattedImportantText,
   stripEditorialMarkers,
@@ -301,7 +302,7 @@ function toRomanNumeral(num: number): string {
   return out;
 }
 
-function buildPageBatches(sessionPages: ParsedPage[], maxWordsPerBatch = 1150): ParsedPage[][] {
+function buildPageBatches(sessionPages: ParsedPage[], maxWordsPerBatch = 550): ParsedPage[][] {
   const batches: ParsedPage[][] = [];
   let currentBatch: ParsedPage[] = [];
   let currentWords = 0;
@@ -310,7 +311,7 @@ function buildPageBatches(sessionPages: ParsedPage[], maxWordsPerBatch = 1150): 
     if (!page.text || !page.text.trim()) continue;
     const w = page.wordCount || page.text.split(/\s+/).filter(Boolean).length;
 
-    if (currentBatch.length > 0 && (currentWords + w > maxWordsPerBatch || currentBatch.length >= 4)) {
+    if (currentBatch.length > 0 && (currentWords + w > maxWordsPerBatch || currentBatch.length >= 2)) {
       batches.push(currentBatch);
       currentBatch = [page];
       currentWords = w;
@@ -695,7 +696,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     const sessionPages = pages.filter(
       p => p.pageNumber >= session.startPage && p.pageNumber <= session.endPage
     );
-    const batches = buildPageBatches(sessionPages, 1150);
+    const batches = buildPageBatches(sessionPages, 550);
     if (batches.length === 0) return;
 
     setIsOrganizingAi(true);
@@ -717,9 +718,11 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
             : `Organizing batch ${bIdx + 1}/${batches.length} (Pages ${bStart}–${bEnd})...`
         );
 
-        const response = await fetch('/api/blc-format-literal', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const response = await fetchWithRetry(
+          '/api/blc-format-literal',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             bookTitle: plan.bookTitle,
             author: plan.author,
@@ -943,8 +946,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     try {
       await new Promise(r => setTimeout(r, 150));
       const dataUrl = await captureCardPngDataUrl(activePart);
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
+      const blob = dataUrlToBlob(dataUrl);
 
       if (navigator.clipboard && typeof window.ClipboardItem !== 'undefined') {
         await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);

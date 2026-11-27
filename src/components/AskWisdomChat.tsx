@@ -3,6 +3,7 @@ import { BookAnalysis, ChatMessage, ExplanationLevel } from '../types/book';
 import { Send, MessageSquare, Sparkles, Loader2, BookOpen, Quote, Trash2 } from 'lucide-react';
 import { ExplanationLevelSelector } from './ExplanationLevelSelector';
 import { useLanguage } from '../context/LanguageContext';
+import { fetchWithRetry } from '../utils/fetchWithRetry';
 
 interface AskWisdomChatProps {
   book: BookAnalysis;
@@ -57,7 +58,7 @@ export const AskWisdomChat: React.FC<AskWisdomChatProps> = ({ book }) => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetchWithRetry('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

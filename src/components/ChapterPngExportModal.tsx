@@ -32,6 +32,7 @@ import {
   paginateModalChunksToCanvasBoundary,
 } from '../utils/canvasSlidePaginator';
 import { getBookFontEmbedCss } from '../utils/fontEmbedHelper';
+import { dataUrlToBlob } from '../utils/fetchWithRetry';
 
 interface ChapterPngExportModalProps {
   isOpen: boolean;
@@ -482,9 +483,7 @@ export const ChapterPngExportModal: React.FC<ChapterPngExportModalProps> = ({
     try {
       await new Promise(r => setTimeout(r, 120));
       const dataUrl = await toPng(cardRef.current, await buildCaptureOptions());
-
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
+      const blob = dataUrlToBlob(dataUrl);
 
       if (navigator.clipboard && window.ClipboardItem) {
         await navigator.clipboard.write([

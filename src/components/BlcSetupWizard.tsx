@@ -30,6 +30,7 @@ import {
   partitionBookIntoSessions,
 } from '../utils/blcBookParser';
 import { saveBlcBookPages } from '../utils/blcLiteralStorage';
+import { fetchWithRetry } from '../utils/fetchWithRetry';
 
 interface BlcSetupWizardProps {
   onPlanGenerated: (plan: BlcPlan) => void;
@@ -189,7 +190,7 @@ export const BlcSetupWizard: React.FC<BlcSetupWizardProps> = ({
     setIsGenerating(true);
     setGenError(null);
 
-    const batchSize = 2;
+    const batchSize = 1;
     const total = sessionPreviews.length;
     let accumulatedSessions: BlcSessionPlan[] =
       resumeFromIndex > 0 ? [...partialSessions] : [];
@@ -218,13 +219,13 @@ export const BlcSetupWizard: React.FC<BlcSetupWizardProps> = ({
           wordCount: part.wordCount,
           estimatedReadingMinutes: part.estimatedReadingMinutes,
           scheduledDate: part.scheduledDate,
-          excerpt: extractSessionExcerpt(parsedBook, part.startPage, part.endPage, 7500),
+          excerpt: extractSessionExcerpt(parsedBook, part.startPage, part.endPage, 6000),
         }));
 
         const contentLanguage =
           planLanguageMode === 'urdu' ? 'Urdu' : detectedBookLanguage;
 
-        const response = await fetch('/api/blc-plan', {
+        const response = await fetchWithRetry('/api/blc-plan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

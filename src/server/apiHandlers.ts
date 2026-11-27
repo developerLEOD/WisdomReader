@@ -14,19 +14,35 @@ const getAiClient = () => {
   });
 };
 
-// Helper for automatic retries and model rotation on 429 quota / 503 capacity errors
-async function generateContentWithFallback(prompt: any, config: any) {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject({ status: 504, message: `${label} timed out after ${Math.round(timeoutMs / 1000)}s.` });
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+// Helper for automatic retries and model rotation on 429 quota / 503 capacity / 504 timeout errors
+async function generateContentWithFallback(prompt: any, config: any, timeoutMs: number = 36_000) {
   const ai = getAiClient();
   const modelsToTry = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'];
 
   let lastErr: any = null;
   for (const model of modelsToTry) {
     try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config,
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model,
+          contents: prompt,
+          config,
+        }),
+        timeoutMs,
+        `Model ${model}`
+      );
       if (response && response.text) {
         return response;
       }
@@ -1552,8 +1568,8 @@ ${sessionPayloadText}`;
 
   const ai = getAiClient();
   const modelCandidates = [
-    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
-    { model: 'gemini-3.1-flash-lite', thinkingLevel: undefined },
+    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW, timeoutMs: 28_000 },
+    { model: 'gemini-3.1-flash-lite', thinkingLevel: undefined, timeoutMs: 24_000 },
   ];
   let lastError: any = null;
 
@@ -1577,11 +1593,15 @@ ${sessionPayloadText}`;
           };
         }
 
-        const response = await ai.models.generateContent({
-          model: candidate.model,
-          contents: prompt,
-          config,
-        });
+        const response = await withTimeout(
+          ai.models.generateContent({
+            model: candidate.model,
+            contents: prompt,
+            config,
+          }),
+          candidate.timeoutMs,
+          `BLC planner (${candidate.model})`
+        );
 
         const rawText = (response.text || '')
           .replace(/^```json\s*/i, '')
@@ -1640,7 +1660,12 @@ ${sessionPayloadText}`;
       } catch (err: any) {
         lastError = err;
         const parsedErr = extractCleanGeminiError(err);
+        const isTimeout = parsedErr.status === 504 || parsedErr.status === 408;
         const isTransient = parsedErr.status === 429 || parsedErr.status === 503;
+        if (isTimeout) {
+          // Immediately move to fast fallback model without burning remaining time
+          break;
+        }
         if (attempt === 0 && isTransient) {
           await new Promise(resolve => setTimeout(resolve, 1200));
           continue;
@@ -1775,8 +1800,8 @@ ${annotatedPages}`;
 
   const ai = getAiClient();
   const modelCandidates = [
-    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
-    { model: 'gemini-3.1-flash-lite', thinkingLevel: undefined },
+    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW, timeoutMs: 28_000 },
+    { model: 'gemini-3.1-flash-lite', thinkingLevel: undefined, timeoutMs: 24_000 },
   ];
   let lastError: any = null;
 
@@ -1797,11 +1822,15 @@ ${annotatedPages}`;
           config.thinkingConfig = { thinkingLevel: candidate.thinkingLevel };
         }
 
-        const response = await ai.models.generateContent({
-          model: candidate.model,
-          contents: prompt,
-          config,
-        });
+        const response = await withTimeout(
+          ai.models.generateContent({
+            model: candidate.model,
+            contents: prompt,
+            config,
+          }),
+          candidate.timeoutMs,
+          `Literal formatter (${candidate.model})`
+        );
 
         const rawText = (response.text || '')
           .replace(/^```json\s*/i, '')
@@ -1890,7 +1919,11 @@ ${annotatedPages}`;
       } catch (err: any) {
         lastError = err;
         const parsedErr = extractCleanGeminiError(err);
+        const isTimeout = parsedErr.status === 504 || parsedErr.status === 408;
         const isTransient = parsedErr.status === 429 || parsedErr.status === 503;
+        if (isTimeout) {
+          break;
+        }
         if (attempt === 0 && isTransient) {
           await new Promise(resolve => setTimeout(resolve, 1200));
           continue;

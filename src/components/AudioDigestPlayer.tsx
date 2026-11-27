@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Volume2, Play, Pause, RotateCcw, VolumeX, Loader2, Sparkles } from 'lucide-react';
+import { fetchWithRetry } from '../utils/fetchWithRetry';
 
 interface AudioDigestPlayerProps {
   summaryText: string;
@@ -47,7 +48,7 @@ export const AudioDigestPlayer: React.FC<AudioDigestPlayerProps> = ({
     setErrorMsg(null);
 
     try {
-      const response = await fetch('/api/tts', {
+      const response = await fetchWithRetry('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
