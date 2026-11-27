@@ -2,7 +2,17 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, Plugin } from 'vite';
-import { handleAnalyzeApi, handleChatApi, handleTtsApi, handleExtractRemediesApi, handleDeepenChapterApi } from './src/server/apiHandlers';
+import {
+  handleAnalyzeApi,
+  handleCombinedAnalyzeApi,
+  handleChatApi,
+  handleTtsApi,
+  handleExtractRemediesApi,
+  handleDeepenChapterApi,
+  handleTranslateContentApi,
+  handleBlcPlanApi,
+  handleBlcFormatLiteralApi,
+} from './src/server/apiHandlers';
 
 async function getJsonBody(req: any): Promise<any> {
   if (req.body && typeof req.body === 'object') {
@@ -60,6 +70,13 @@ function apiDevServerPlugin(): Plugin {
               return;
             }
 
+            if (url.startsWith('/api/combined-analyze') && req.method === 'POST') {
+              const result = await handleCombinedAnalyzeApi(parsedBody);
+              res.statusCode = 200;
+              res.end(JSON.stringify(result));
+              return;
+            }
+
             if (url.startsWith('/api/deepen-chapter') && req.method === 'POST') {
               const result = await handleDeepenChapterApi(parsedBody);
               res.statusCode = 200;
@@ -83,6 +100,27 @@ function apiDevServerPlugin(): Plugin {
 
             if (url.startsWith('/api/tts') && req.method === 'POST') {
               const result = await handleTtsApi(parsedBody);
+              res.statusCode = 200;
+              res.end(JSON.stringify(result));
+              return;
+            }
+
+            if (url.startsWith('/api/translate-content') && req.method === 'POST') {
+              const result = await handleTranslateContentApi(parsedBody);
+              res.statusCode = 200;
+              res.end(JSON.stringify(result));
+              return;
+            }
+
+            if (url.startsWith('/api/blc-plan') && req.method === 'POST') {
+              const result = await handleBlcPlanApi(parsedBody);
+              res.statusCode = 200;
+              res.end(JSON.stringify(result));
+              return;
+            }
+
+            if (url.startsWith('/api/blc-format-literal') && req.method === 'POST') {
+              const result = await handleBlcFormatLiteralApi(parsedBody);
               res.statusCode = 200;
               res.end(JSON.stringify(result));
               return;

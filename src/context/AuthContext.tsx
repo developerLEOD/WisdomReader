@@ -60,6 +60,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const message =
         code === 'auth/popup-blocked'
           ? 'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.'
+          : code === 'auth/unauthorized-domain'
+          ? `This domain (${window.location.hostname}) is not authorized in Firebase Authentication. Add it under Firebase Console → Authentication → Settings → Authorized domains.`
           : err?.message || 'Could not sign in with Google.';
       setAuthError(message);
       return null;

@@ -190,7 +190,14 @@ export const AnalysisStudio: React.FC<AnalysisStudioProps> = ({
       });
 
       if (response.ok) {
-        const deepenedData: ChapterSummary = await response.json();
+        const rawText = await response.text();
+        let deepenedData: ChapterSummary | null = null;
+        try {
+          deepenedData = rawText ? JSON.parse(rawText) : null;
+        } catch {
+          deepenedData = null;
+        }
+        if (!deepenedData) return;
         const updatedChapters = currentBook.chapters.map(c => 
           c.number === chapterNumber ? { ...c, ...deepenedData } : c
         );

@@ -1,8 +1,11 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Set worker source for pdfjs-dist
+// Set worker source for pdfjs-dist using bundled local worker asset
 try {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.10.38'}/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url
+  ).toString();
 } catch (e) {
   console.warn('PDF.js worker initialization notice:', e);
 }

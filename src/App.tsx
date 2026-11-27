@@ -104,7 +104,13 @@ function AppContent() {
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const rawText = await response.text();
+        let data: any = null;
+        try {
+          data = rawText ? JSON.parse(rawText) : null;
+        } catch {
+          data = null;
+        }
         if (data && data.executiveSummary) {
           handleAnalysisComplete(data);
           return;

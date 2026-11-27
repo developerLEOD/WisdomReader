@@ -254,11 +254,17 @@ export const ModernRemediesView: React.FC<ModernRemediesViewProps> = ({ book, on
         })
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to extract remedies from server.');
+      const rawText = await response.text();
+      let data: any = null;
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        data = null;
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || rawText || `Failed to extract remedies from server (${response.status}).`);
+      }
       if (data && data.remedies && data.remedies.length > 0) {
         const newRemedies = [...(book.modernRemedies || []), ...data.remedies];
         const updatedBook = {

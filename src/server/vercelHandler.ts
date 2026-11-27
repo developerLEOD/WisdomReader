@@ -8,7 +8,7 @@ import {
   handleTranslateContentApi,
   handleBlcPlanApi,
   handleBlcFormatLiteralApi,
-} from '../src/server/apiHandlers';
+} from './apiHandlers';
 
 async function getJsonBody(req: any): Promise<any> {
   if (req.body !== undefined && req.body !== null) {
@@ -56,7 +56,8 @@ async function getJsonBody(req: any): Promise<any> {
 }
 
 function resolveApiPath(req: any): string {
-  const urlObj = new URL(req.url || '/', 'http://localhost');
+  const rawUrl = typeof req.url === 'string' && req.url.startsWith('/') ? req.url : '/';
+  const urlObj = new URL(rawUrl, 'http://localhost');
   const routeParam = req.query?.__route ?? urlObj.searchParams.get('__route');
   const rawRoute = Array.isArray(routeParam) ? routeParam[0] : routeParam;
 
@@ -74,17 +75,19 @@ function sendJson(res: any, statusCode: number, payload: any) {
 }
 
 export default async function handler(req: any, res: any) {
-  const method = (req.method || 'GET').toUpperCase();
-
-  if (method === 'OPTIONS') {
-    res.statusCode = 204;
-    res.end();
-    return;
-  }
-
-  const pathname = resolveApiPath(req);
+  let pathname = '/api';
 
   try {
+    const method = (req.method || 'GET').toUpperCase();
+
+    if (method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    pathname = resolveApiPath(req);
+
     if (pathname === '/api/health' && method === 'GET') {
       return sendJson(res, 200, { status: 'ok', timestamp: Date.now() });
     }

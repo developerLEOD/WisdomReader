@@ -17,7 +17,7 @@ const getAiClient = () => {
 // Helper for automatic retries and model rotation on 429 quota / 503 capacity errors
 async function generateContentWithFallback(prompt: any, config: any) {
   const ai = getAiClient();
-  const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-pro-preview'];
+  const modelsToTry = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'];
 
   let lastErr: any = null;
   for (const model of modelsToTry) {
@@ -437,7 +437,7 @@ export async function handleTtsApi(body: any) {
   const selectedVoice = voiceName || 'Kore';
 
   const ai = getAiClient();
-  const ttsModels = ['gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-lite'];
 
   let lastErr: any = null;
   for (const model of ttsModels) {

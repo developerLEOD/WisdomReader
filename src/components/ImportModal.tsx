@@ -251,7 +251,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             documents: stagedDocs.map(d => ({
               title: d.title,
               author: d.author,
-              text: d.text,
+              text: d.text.slice(0, 120000),
               fileName: d.fileName
             })),
             combinedTitle: finalTitle,
@@ -310,7 +310,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text,
+            text: text.slice(0, 220000),
             title: finalTitle,
             author: finalAuthor,
             category,
@@ -370,7 +370,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: doc.text,
+            text: doc.text.slice(0, 220000),
             title: doc.title,
             author: doc.author || 'Author',
             category,
@@ -379,7 +379,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           })
         });
         if (response.ok) {
-          const data = await response.json();
+          const rawText = await response.text();
+          let data: any = null;
+          try {
+            data = rawText ? JSON.parse(rawText) : null;
+          } catch {
+            console.warn(`Batch API JSON parse notice for ${doc.title}`);
+          }
           if (data && data.executiveSummary) {
             book = { ...data, explanationLevel };
           }
