@@ -992,6 +992,8 @@ function buildPartFromBlocks(
     chapterName?: string;
     isSessionCoverPage?: boolean;
     isChapterTitlePage?: boolean;
+    chapterEyebrow?: string;
+    chapterCaption?: string;
     sessionOverview?: string;
     sessionPillars?: BlcSessionPillar[];
     isAiOrganized?: boolean;
@@ -1016,6 +1018,8 @@ function buildPartFromBlocks(
     chapterName: options.chapterName,
     isSessionCoverPage: options.isSessionCoverPage,
     isChapterTitlePage: options.isChapterTitlePage,
+    chapterEyebrow: options.chapterEyebrow,
+    chapterCaption: options.chapterCaption,
     sessionOverview: options.sessionOverview,
     sessionPillars: options.sessionPillars,
     startPage,
@@ -1099,6 +1103,31 @@ function truncateToSentenceLimit(text: string, maxChars: number = 175): string {
   return `${(lastSpace > maxChars * 0.55 ? clipped.slice(0, lastSpace) : clipped).trim()}…`;
 }
 
+function normalizeTitleForComparison(title: string): string {
+  return stripEditorialMarkers(title || '')
+    .toLowerCase()
+    .replace(/^(session|chapter|chap\.?|part|book|section|week|day|module)\s+[\divxlcdm]+\s*[:\-–—.]?\s*/i, '')
+    .replace(/^(باب|فصل|نشست|سبق|حصہ)\s+[\d\u0660-\u0669\u06F0-\u06F9]+\s*[:\-–—۔]?\s*/i, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function titlesDuplicateEachOther(a: string, b: string): boolean {
+  const normA = normalizeTitleForComparison(a);
+  const normB = normalizeTitleForComparison(b);
+  if (!normA || !normB) return false;
+  if (normA === normB || normA.includes(normB) || normB.includes(normA)) return true;
+
+  const tokensA = normA.split(' ').filter(t => t.length > 2);
+  const tokensB = normB.split(' ').filter(t => t.length > 2);
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  const setB = new Set(tokensB);
+  const shared = tokensA.filter(t => setB.has(t)).length;
+  const overlap = shared / Math.min(tokensA.length, tokensB.length);
+  return overlap >= 0.72;
+}
+
 export function expandPartsWithDedicatedChapterPages(
   rawParts: BlcLiteralReadingPart[],
   readingSpeedWpm: number = 200,
@@ -1149,10 +1178,23 @@ export function expandPartsWithDedicatedChapterPages(
           buffer = [];
         }
 
-        activeChapterName = b.text.replace(/:$/, '').trim();
+        const headingClean = stripEditorialMarkers(b.text).replace(/:$/, '').trim();
+        let eyebrowOverride: string | undefined;
+
+        // If the immediately preceding expanded folio is also a chapter title page with no prose in between,
+        // coalesce them into one chapter title folio (promoting the outer title as eyebrow) rather than two empty title slides.
+        const prevExpanded = expanded[expanded.length - 1];
+        if (prevExpanded && prevExpanded.isChapterTitlePage) {
+          eyebrowOverride = prevExpanded.chapterName || prevExpanded.contextualTitle;
+          expanded.pop();
+        }
+
+        activeChapterName = headingClean;
         const titleBlocks: BlcLiteralBlock[] = [b];
+        let explicitCaption: string | undefined;
         if (i + 1 < blocks.length && blocks[i + 1].type === 'subheading') {
           titleBlocks.push(blocks[i + 1]);
+          explicitCaption = stripEditorialMarkers(blocks[i + 1].text).replace(/:$/, '').trim();
           i++;
         }
 
@@ -1161,6 +1203,8 @@ export function expandPartsWithDedicatedChapterPages(
             contextualTitle: activeChapterName,
             chapterName: activeChapterName,
             isChapterTitlePage: true,
+            chapterEyebrow: eyebrowOverride || part.chapterEyebrow,
+            chapterCaption: explicitCaption || part.chapterCaption,
             isAiOrganized: part.isAiOrganized,
           })
         );
@@ -1189,7 +1233,67 @@ export function expandPartsWithDedicatedChapterPages(
     }
   }
 
-  // Inject Folio I as a Whole-Session Summary Cover Slide summing up ALL topics & chapters of the session
+  // Deduplicate Folio II if it is a Chapter Title Folio that repeats the Session Cover or Book Title verbatim
+  let promotedSubtitleFromFirstHeading: string | undefined;
+  if (coverMeta && expanded.length > 1 && expanded[0].isChapterTitlePage) {
+    const firstHeadingTitle = expanded[0].chapterName || expanded[0].contextualTitle || '';
+    if (
+      titlesDuplicateEachOther(firstHeadingTitle, coverMeta.sessionTitle) ||
+      titlesDuplicateEachOther(firstHeadingTitle, coverMeta.bookTitle)
+    ) {
+      const sub = expanded[0].blocks.find(b => b.type === 'subheading')?.text || expanded[0].chapterCaption;
+      if (sub) {
+        promotedSubtitleFromFirstHeading = stripEditorialMarkers(sub).trim();
+      }
+      expanded.shift();
+    }
+  }
+
+  // Guarantee uniform, consistent eyebrow & thematic caption on EVERY dedicated Chapter Title Folio
+  let chapterOrdinal = 0;
+  for (let idx = 0; idx < expanded.length; idx++) {
+    const item = expanded[idx];
+    if (!item.isChapterTitlePage) continue;
+    chapterOrdinal++;
+
+    const headingText = item.chapterName || item.contextualTitle || item.plainText;
+    const isRtlHeading = /[\u0600-\u06FF]/.test(headingText);
+    const isUrduHeading = /[\u0679\u067E\u0686\u0688\u0691\u0698\u06A9\u06AF\u06BA\u06BE\u06C1-\u06C3\u06CC\u06D2\u06D3\u06D4]/.test(
+      headingText
+    );
+
+    if (!item.chapterEyebrow) {
+      item.chapterEyebrow = isUrduHeading
+        ? `باب / فصل · صفحہ ${item.startPage}`
+        : isRtlHeading
+        ? `فصل · صفحة ${item.startPage}`
+        : `Section ${toRomanSimple(chapterOrdinal)} · Page ${item.startPage}`;
+    }
+
+    if (!item.chapterCaption) {
+      const subInSelf = item.blocks.find(b => b.type === 'subheading')?.text;
+      if (subInSelf && subInSelf.trim()) {
+        item.chapterCaption = stripEditorialMarkers(subInSelf).replace(/:$/, '').trim();
+      } else {
+        // Look ahead to the next prose folio to synthesize a consistent 1-line thematic preview caption
+        const nextProse = expanded.slice(idx + 1).find(p => !p.isChapterTitlePage && p.blocks.length > 0);
+        const leadBlock =
+          nextProse?.blocks.find(b => b.type === 'subheading') ||
+          nextProse?.blocks.find(b => b.type === 'paragraph' || b.type === 'quote');
+        const rawLead = leadBlock ? stripEditorialMarkers(leadBlock.text).trim() : '';
+        if (rawLead) {
+          item.chapterCaption = truncateToSentenceLimit(rawLead, 110);
+        } else if (coverMeta?.sessionPillars && coverMeta.sessionPillars.length > 0) {
+          item.chapterCaption = truncateToSentenceLimit(
+            coverMeta.sessionPillars[0].summary || coverMeta.sessionPillars[0].title,
+            110
+          );
+        }
+      }
+    }
+  }
+
+  // Inject Folio I as a Whole-Session Summary Cover Folio summing up ALL topics & chapters of the session
   if (coverMeta && expanded.length > 0) {
     const discoveredHeadings = expanded
       .filter(p => p.isChapterTitlePage && p.chapterName)
@@ -1247,6 +1351,7 @@ export function expandPartsWithDedicatedChapterPages(
     let wholeSessionOverview = (
       coverMeta.sessionOverview ||
       priorCover?.sessionOverview ||
+      promotedSubtitleFromFirstHeading ||
       ''
     ).trim();
 
@@ -1289,7 +1394,9 @@ export function expandPartsWithDedicatedChapterPages(
       chapterName: adaptiveCoverChapters.join(' · ') || coverMeta.sessionTitle,
       isSessionCoverPage: true,
       isChapterTitlePage: false,
+      chapterCaption: promotedSubtitleFromFirstHeading,
       sessionOverview: wholeSessionOverview || undefined,
+      sessionPillars: wholeSessionPillars.length > 0 ? wholeSessionPillars : undefined,
       isAiOrganized: expanded.some(p => p.isAiOrganized),
     });
     builtCover.startPage = coverMeta.startPage;
@@ -1306,6 +1413,29 @@ export function expandPartsWithDedicatedChapterPages(
     partNumber: idx + 1,
     totalParts,
   }));
+}
+
+function toRomanSimple(num: number): string {
+  const map: Array<[number, string]> = [
+    [100, 'C'],
+    [90, 'XC'],
+    [50, 'L'],
+    [40, 'XL'],
+    [10, 'X'],
+    [9, 'IX'],
+    [5, 'V'],
+    [4, 'IV'],
+    [1, 'I'],
+  ];
+  let n = Math.max(1, Math.min(399, Math.round(num)));
+  let out = '';
+  for (const [val, sym] of map) {
+    while (n >= val) {
+      out += sym;
+      n -= val;
+    }
+  }
+  return out;
 }
 
 export function splitSessionLiteralTextIntoParts(

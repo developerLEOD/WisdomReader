@@ -63,6 +63,8 @@ export interface BlcLiteralReadingPart {
   chapterName?: string;
   isSessionCoverPage?: boolean;
   isChapterTitlePage?: boolean;
+  chapterEyebrow?: string;
+  chapterCaption?: string;
   sessionOverview?: string;
   sessionPillars?: BlcSessionPillar[];
   startPage: number;

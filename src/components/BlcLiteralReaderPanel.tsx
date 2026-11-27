@@ -987,7 +987,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
         '0'
       )}.png`;
       triggerDownloadDataUrl(dataUrl, fileName);
-      showTempFeedback(`Downloaded ${ratio !== 'auto' ? 'Slide' : 'Folio'} ${toRomanNumeral(p.partNumber)} PNG`);
+      showTempFeedback(`Downloaded Folio ${toRomanNumeral(p.partNumber)} PNG`);
     } catch {
       showTempFeedback('Could not generate PNG for this part.');
     } finally {
@@ -1002,9 +1002,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     const validTitle = resolveDisplayTitleForPart(p, sessionHasUrduContext);
     const titleSuffix = validTitle ? ` · ${validTitle}` : '';
     const cleanBody = stripEditorialMarkers(p.plainText);
-    const formatted = `${plan.bookTitle} — Session ${session.sessionNumber} (${
-      ratio !== 'auto' && !useBaseParts ? 'Slide' : 'Folio'
-    } ${toRomanNumeral(p.partNumber)}/${toRomanNumeral(p.totalParts)}${titleSuffix})\n\n${cleanBody}`;
+    const formatted = `${plan.bookTitle} — Session ${session.sessionNumber} (Folio ${toRomanNumeral(p.partNumber)}/${toRomanNumeral(p.totalParts)}${titleSuffix})\n\n${cleanBody}`;
     try {
       await navigator.clipboard.writeText(formatted);
     } catch {
@@ -1015,7 +1013,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
       document.execCommand('copy');
       document.body.removeChild(ta);
     }
-    showTempFeedback(`Copied ${ratio !== 'auto' && !useBaseParts ? 'Slide' : 'Folio'} ${toRomanNumeral(p.partNumber)} literal text`);
+    showTempFeedback(`Copied Folio ${toRomanNumeral(p.partNumber)} literal text`);
   };
 
   const handleDownloadSessionTxt = () => {
@@ -1066,131 +1064,323 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     const scriptKind = detectScriptKind(coverTitle, bookHasUrdu);
     const isFixedRatio = ratio !== 'auto';
     const isLandscape = ratio === '16:9';
+    const isTall = ratio === '9:16';
+
+    const overviewRaw = (part.sessionOverview || '').trim();
+    const overviewScript = overviewRaw ? detectScriptKind(overviewRaw, bookHasUrdu) : scriptKind;
+    const pillars = (part.sessionPillars || []).filter(p => p.title && p.title.trim()).slice(0, isLandscape ? 2 : 3);
 
     const crestSvg = (
       <svg
-        viewBox="0 0 200 84"
+        viewBox="0 0 240 92"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
-        className={isLandscape ? 'w-32 h-auto mx-auto' : isFixedRatio ? 'w-52 h-auto mx-auto' : 'w-40 sm:w-56 h-auto mx-auto'}
+        className={
+          isLandscape
+            ? 'w-28 h-auto mx-auto shrink-0'
+            : isTall
+            ? 'w-48 h-auto mx-auto shrink-0'
+            : isFixedRatio
+            ? 'w-40 h-auto mx-auto shrink-0'
+            : 'w-36 sm:w-48 h-auto mx-auto shrink-0'
+        }
         aria-hidden="true"
       >
-        {/* Outer Architectural Double Frame Arch */}
+        {/* Outer Architectural Double Arch & Corner Filigree */}
         <path
-          d="M24 76 V36 C24 14 58 4 100 4 C142 4 176 14 176 36 V76"
+          d="M22 84 V38 C22 14 66 4 120 4 C174 4 218 14 218 38 V84"
           stroke={palette.border}
           strokeWidth="1.2"
         />
         <path
-          d="M32 76 V38 C32 19 62 10 100 10 C138 10 168 19 168 38 V76"
+          d="M32 84 V40 C32 20 72 10 120 10 C168 10 208 20 208 40 V84"
           stroke={palette.innerFrame}
           strokeWidth="0.9"
           strokeDasharray="4 3"
         />
-        {/* Radiant Star Emblem */}
-        <path
-          d="M100 16 L103.5 27 L114.5 30.5 L103.5 34 L100 44.5 L96.5 34 L85.5 30.5 L96.5 27 Z"
+        {/* 8-Pointed Geometric Seal / Star Rosette */}
+        <rect
+          x="109"
+          y="20"
+          width="22"
+          height="22"
+          transform="rotate(45 120 31)"
           stroke={palette.accent}
-          strokeWidth="1.4"
+          strokeWidth="1.2"
         />
-        <circle cx="100" cy="30.5" r="2.2" fill={palette.accent} />
-        {/* Delicate Laurel Fronds */}
-        <path
-          d="M70 38 C60 33 54 26 52 18 M80 34 C74 29 73 23 76 19 M60 30 C54 29 50 25 48 21"
+        <rect
+          x="109"
+          y="20"
+          width="22"
+          height="22"
           stroke={palette.accent}
           strokeWidth="1.1"
+          opacity="0.7"
+        />
+        <circle cx="120" cy="31" r="3" fill={palette.accent} />
+        {/* Symmetric Botanical Laurel Wings */}
+        <path
+          d="M84 40 C72 34 64 26 62 17 M95 35 C88 29 87 23 90 18 M72 31 C65 30 60 25 58 20"
+          stroke={palette.accent}
+          strokeWidth="1.15"
           strokeLinecap="round"
         />
         <path
-          d="M130 38 C140 33 146 26 148 18 M120 34 C126 29 127 23 124 19 M140 30 C146 29 150 25 152 21"
+          d="M156 40 C168 34 176 26 178 17 M145 35 C152 29 153 23 150 18 M168 31 C175 30 180 25 182 20"
           stroke={palette.accent}
-          strokeWidth="1.1"
+          strokeWidth="1.15"
           strokeLinecap="round"
         />
-        {/* Open Codex at Base */}
+        {/* Open Illuminated Codex */}
         <path
-          d="M56 68 C74 60 88 60 100 68 C112 60 126 60 144 68 V48 C126 42 112 42 100 50 C88 42 74 42 56 48 Z"
+          d="M68 74 C90 65 106 65 120 74 C134 65 150 65 172 74 V51 C150 44 134 44 120 53 C106 44 90 44 68 51 Z"
           stroke={palette.accent}
-          strokeWidth="1.4"
+          strokeWidth="1.35"
           strokeLinejoin="round"
         />
-        <line x1="100" y1="50" x2="100" y2="68" stroke={palette.accent} strokeWidth="1.3" />
+        <line x1="120" y1="53" x2="120" y2="74" stroke={palette.accent} strokeWidth="1.3" />
         <path
-          d="M66 53 C76 50 85 51 92 55 M66 59 C76 56 85 57 92 61 M134 53 C124 50 115 51 108 55 M134 59 C124 56 115 57 108 61"
+          d="M80 57 C92 54 103 55 111 59 M80 64 C92 61 103 62 111 66 M160 57 C148 54 137 55 129 59 M160 64 C148 61 137 62 129 66"
           stroke={palette.textSecondary}
-          strokeWidth="0.9"
+          strokeWidth="0.95"
           strokeLinecap="round"
         />
       </svg>
     );
 
+    if (isLandscape) {
+      return (
+        <div
+          dir={scriptKind === 'latin' ? 'ltr' : 'rtl'}
+          className="flex-1 grid grid-cols-12 items-center gap-6 px-6 py-2 overflow-hidden"
+        >
+          {/* Left Frontispiece Plaque */}
+          <div className="col-span-7 flex flex-col items-center justify-center text-center space-y-2.5 pr-4 border-r" style={{ borderColor: palette.border }}>
+            <p
+              style={{ color: palette.textSecondary }}
+              className="text-[10px] font-serif-body uppercase tracking-[0.22em] font-semibold line-clamp-1"
+            >
+              {plan.bookTitle}
+            </p>
+            {crestSvg}
+            <div
+              style={{ color: palette.accent }}
+              className="flex items-center justify-center gap-2.5 text-[10px] font-serif-body uppercase tracking-[0.26em] font-semibold"
+            >
+              <span style={{ backgroundColor: palette.border }} className="h-px w-10" />
+              <span>
+                {scriptKind === 'urdu'
+                  ? `نشست ${session.sessionNumber}`
+                  : `Session ${toRomanNumeral(session.sessionNumber)}`}
+              </span>
+              <span style={{ backgroundColor: palette.border }} className="h-px w-10" />
+            </div>
+            <h4
+              style={{ color: palette.textPrimary }}
+              className={`max-w-lg mx-auto line-clamp-2 ${
+                scriptKind === 'urdu'
+                  ? 'font-urdu text-[24px] leading-[1.6] font-normal'
+                  : scriptKind === 'arabic'
+                  ? 'font-arabic text-[22px] leading-[1.55] font-bold'
+                  : 'font-serif-display text-[25px] leading-[1.14] font-semibold tracking-tight [text-wrap:balance]'
+              }`}
+            >
+              {stripEditorialMarkers(coverTitle)}
+            </h4>
+            {plan.author && (
+              <p
+                style={{ color: palette.textSecondary }}
+                className="text-[10.5px] font-serif-body tracking-wide"
+              >
+                {plan.author}
+              </p>
+            )}
+          </div>
+
+          {/* Right Synopsis & Key Pillars Column */}
+          <div className="col-span-5 flex flex-col justify-center space-y-3 text-left overflow-hidden" dir={overviewScript === 'latin' ? 'ltr' : 'rtl'}>
+            <div className="space-y-1">
+              <p
+                style={{ color: palette.accent }}
+                className="text-[9.5px] font-serif-body uppercase tracking-[0.2em] font-semibold"
+              >
+                {overviewScript === 'urdu' ? 'خلاصۂ نشست' : 'Session Frontispiece'}
+              </p>
+              {overviewRaw ? (
+                <p
+                  style={{ color: palette.textPrimary }}
+                  className={
+                    overviewScript === 'urdu'
+                      ? 'font-urdu text-[13.5px] leading-[1.85] text-right line-clamp-4'
+                      : overviewScript === 'arabic'
+                      ? 'font-arabic text-[13px] leading-[1.75] text-right line-clamp-4'
+                      : 'font-serif-body text-[12px] leading-[1.55] italic line-clamp-4'
+                  }
+                >
+                  {overviewRaw}
+                </p>
+              ) : (
+                <p style={{ color: palette.textSecondary }} className="font-serif-body text-[12px] italic">
+                  {plan.bookTitle}
+                </p>
+              )}
+            </div>
+
+            {pillars.length > 0 && (
+              <div className="pt-2 border-t space-y-1.5" style={{ borderColor: palette.border }}>
+                <p
+                  style={{ color: palette.accent }}
+                  className="text-[9.5px] font-serif-body uppercase tracking-[0.18em] font-semibold"
+                >
+                  {overviewScript === 'urdu' ? 'اہم مباحث' : 'In This Reading'}
+                </p>
+                <ul className="space-y-1">
+                  {pillars.map((pil, idx) => (
+                    <li
+                      key={idx}
+                      style={{ color: palette.textPrimary }}
+                      className={`flex items-baseline gap-1.5 ${
+                        detectScriptKind(pil.title, bookHasUrdu) === 'urdu'
+                          ? 'font-urdu text-[13px] leading-[1.7]'
+                          : 'font-serif-body text-[11.5px] leading-[1.35]'
+                      }`}
+                    >
+                      <span style={{ color: palette.accent }} className="text-[9px] shrink-0">◆</span>
+                      <span className="line-clamp-1">{stripEditorialMarkers(pil.title)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         dir={scriptKind === 'latin' ? 'ltr' : 'rtl'}
-        className={`flex-1 flex flex-col items-center justify-center text-center ${
-          isLandscape
-            ? 'px-8 py-2 space-y-2'
+        className={`flex-1 flex flex-col items-center justify-between text-center ${
+          isTall
+            ? 'px-8 py-8 space-y-5'
             : isFixedRatio
-            ? 'px-10 py-14 space-y-7'
-            : 'px-4 sm:px-14 py-10 sm:py-20 space-y-6 sm:space-y-9'
+            ? 'px-8 py-5 space-y-3.5'
+            : 'px-3 sm:px-10 py-6 sm:py-10 space-y-5 sm:space-y-6'
         }`}
       >
-        {crestSvg}
-
-        <div className={isLandscape ? 'space-y-1.5' : 'space-y-2 sm:space-y-3'}>
-          <div
-            style={{ color: palette.accent }}
-            className="flex items-center justify-center gap-3 text-[11px] font-serif-body uppercase tracking-[0.28em] font-semibold"
-          >
-            <span style={{ backgroundColor: palette.border }} className={isFixedRatio ? 'h-px w-16' : 'h-px w-8 sm:w-20'} />
-            <span>
-              {scriptKind === 'urdu'
-                ? `نشست ${session.sessionNumber}`
-                : `Session ${toRomanNumeral(session.sessionNumber)}`}
-            </span>
-            <span style={{ backgroundColor: palette.border }} className={isFixedRatio ? 'h-px w-16' : 'h-px w-8 sm:w-20'} />
-          </div>
-
-          <h4
-            style={{ color: palette.textPrimary }}
-            className={`max-w-2xl mx-auto ${
-              scriptKind === 'urdu'
-                ? isLandscape
-                  ? 'font-urdu text-[28px] leading-[1.65] font-normal'
-                  : isFixedRatio
-                  ? 'font-urdu text-[44px] leading-[1.82] font-normal'
-                  : 'font-urdu text-[32px] sm:text-[50px] leading-[1.85] font-normal'
-                : scriptKind === 'arabic'
-                ? isLandscape
-                  ? 'font-arabic text-[26px] leading-[1.62] font-bold'
-                  : isFixedRatio
-                  ? 'font-arabic text-[40px] leading-[1.78] font-bold'
-                  : 'font-arabic text-[30px] sm:text-[44px] leading-[1.8] font-bold'
-                : isLandscape
-                ? 'font-serif-display text-[28px] leading-[1.14] font-semibold tracking-tight [text-wrap:balance]'
-                : isFixedRatio
-                ? 'font-serif-display text-[44px] leading-[1.08] font-semibold tracking-tight [text-wrap:balance]'
-                : 'font-serif-display text-[30px] sm:text-[50px] leading-[1.1] font-semibold tracking-tight [text-wrap:balance]'
-            }`}
-          >
-            {stripEditorialMarkers(coverTitle)}
-          </h4>
-        </div>
-
-        <div className="space-y-1.5 pt-1">
-          <div
-            style={{ backgroundColor: palette.border }}
-            className="h-px w-16 sm:w-20 mx-auto opacity-75"
-            aria-hidden="true"
-          />
+        {/* Top Book & Author Plaque */}
+        <div className="w-full space-y-1.5 pt-1">
           <p
             style={{ color: palette.textSecondary }}
-            className={isFixedRatio ? 'text-[12px] font-serif-body uppercase tracking-[0.2em] font-medium' : 'text-[11px] sm:text-[12px] font-serif-body uppercase tracking-[0.2em] font-medium'}
+            className={`font-serif-display italic tracking-wide line-clamp-1 ${
+              isFixedRatio ? 'text-[14px]' : 'text-[13px] sm:text-[15px]'
+            }`}
           >
             {plan.bookTitle}
-            {plan.author ? ` · ${plan.author}` : ''}
+            {plan.author ? ` — ${plan.author}` : ''}
           </p>
+          <div
+            style={{ backgroundColor: palette.border }}
+            className="h-px w-24 mx-auto opacity-80"
+            aria-hidden="true"
+          />
         </div>
+
+        {/* Center Illuminated Crest & Session Hero Title */}
+        <div className={`flex flex-col items-center ${isTall ? 'space-y-5' : 'space-y-3'}`}>
+          {crestSvg}
+
+          <div className="space-y-2">
+            <div
+              style={{ color: palette.accent }}
+              className="flex items-center justify-center gap-3 text-[11px] font-serif-body uppercase tracking-[0.28em] font-semibold"
+            >
+              <span style={{ backgroundColor: palette.border }} className="h-px w-10 sm:w-16" />
+              <span>
+                {scriptKind === 'urdu'
+                  ? `نشست ${session.sessionNumber}`
+                  : `Session ${toRomanNumeral(session.sessionNumber)}`}
+              </span>
+              <span style={{ backgroundColor: palette.border }} className="h-px w-10 sm:w-16" />
+            </div>
+
+            <h4
+              style={{ color: palette.textPrimary }}
+              className={`max-w-xl mx-auto ${
+                scriptKind === 'urdu'
+                  ? isTall
+                    ? 'font-urdu text-[38px] leading-[1.82] font-normal'
+                    : isFixedRatio
+                    ? 'font-urdu text-[32px] leading-[1.78] font-normal'
+                    : 'font-urdu text-[28px] sm:text-[40px] leading-[1.85] font-normal'
+                  : scriptKind === 'arabic'
+                  ? isTall
+                    ? 'font-arabic text-[36px] leading-[1.78] font-bold'
+                    : isFixedRatio
+                    ? 'font-arabic text-[30px] leading-[1.72] font-bold'
+                    : 'font-arabic text-[28px] sm:text-[38px] leading-[1.8] font-bold'
+                  : isTall
+                  ? 'font-serif-display text-[38px] leading-[1.08] font-semibold tracking-tight [text-wrap:balance]'
+                  : isFixedRatio
+                  ? 'font-serif-display text-[32px] leading-[1.1] font-semibold tracking-tight [text-wrap:balance]'
+                  : 'font-serif-display text-[28px] sm:text-[40px] leading-[1.1] font-semibold tracking-tight [text-wrap:balance]'
+              }`}
+            >
+              {stripEditorialMarkers(coverTitle)}
+            </h4>
+          </div>
+
+          {overviewRaw && (
+            <div
+              style={{
+                backgroundColor: palette.quoteBg,
+                borderColor: palette.border,
+              }}
+              dir={overviewScript === 'latin' ? 'ltr' : 'rtl'}
+              className={`max-w-md mx-auto border-y px-4 py-2.5 ${
+                isFixedRatio && !isTall ? 'line-clamp-3' : ''
+              }`}
+            >
+              <p
+                style={{ color: palette.textSecondary }}
+                className={
+                  overviewScript === 'urdu'
+                    ? 'font-urdu text-[14.5px] leading-[1.95] text-center line-clamp-3'
+                    : overviewScript === 'arabic'
+                    ? 'font-arabic text-[13.5px] leading-[1.85] text-center line-clamp-3'
+                    : 'font-serif-body text-[12.5px] leading-[1.58] italic text-center line-clamp-3'
+                }
+              >
+                {overviewRaw}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom Chapter/Topic Highlights */}
+        {pillars.length > 0 && (
+          <div className="w-full pb-1">
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 max-w-md mx-auto">
+              {pillars.map((pil, idx) => (
+                <span
+                  key={idx}
+                  style={{ color: palette.subheadingColor }}
+                  className={`inline-flex items-center gap-1.5 ${
+                    detectScriptKind(pil.title, bookHasUrdu) === 'urdu'
+                      ? 'font-urdu text-[13.5px] leading-[1.7]'
+                      : 'font-serif-body text-[11.5px] font-medium'
+                  }`}
+                >
+                  {idx > 0 && (
+                    <span style={{ color: palette.border }} aria-hidden="true">·</span>
+                  )}
+                  <span style={{ color: palette.accent }} className="text-[9px]" aria-hidden="true">◆</span>
+                  <span className="truncate max-w-[200px]">{stripEditorialMarkers(pil.title)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -1209,6 +1399,24 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
     const isFixedRatio = ratio !== 'auto';
     const isLandscape = ratio === '16:9';
 
+    const eyebrowText =
+      part.chapterEyebrow ||
+      (scriptKind === 'urdu'
+        ? `باب / فصل · صفحہ ${part.startPage}`
+        : scriptKind === 'arabic'
+        ? `فصل · صفحة ${part.startPage}`
+        : `Section Opening · Page ${part.startPage}`);
+
+    const captionText =
+      part.chapterCaption ||
+      (subheadingBlock?.text ? stripEditorialMarkers(subheadingBlock.text) : '') ||
+      (scriptKind === 'urdu'
+        ? `صفحہ ${part.startPage} سے تسلسلِ مطالعہ`
+        : scriptKind === 'arabic'
+        ? `متابعة القراءة من صفحة ${part.startPage}`
+        : `Reading commences on Page ${part.startPage}`);
+    const captionScript = detectScriptKind(captionText, bookHasUrdu);
+
     return (
       <div
         dir={scriptKind === 'latin' ? 'ltr' : 'rtl'}
@@ -1216,8 +1424,8 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
           isLandscape
             ? 'py-4 space-y-3'
             : isFixedRatio
-            ? 'py-12 space-y-6'
-            : 'py-10 sm:py-16 space-y-6'
+            ? 'py-12 space-y-5'
+            : 'py-10 sm:py-16 space-y-5'
         }`}
       >
         <div
@@ -1230,6 +1438,19 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
           <span style={{ backgroundColor: palette.border }} className="h-px w-12" />
         </div>
 
+        <p
+          style={{ color: palette.accent }}
+          className={
+            scriptKind === 'urdu'
+              ? 'font-urdu text-[13.5px] leading-[1.6] tracking-wide'
+              : scriptKind === 'arabic'
+              ? 'font-arabic text-[13px] leading-[1.6] font-semibold'
+              : 'font-serif-body text-[10.5px] uppercase tracking-[0.24em] font-semibold'
+          }
+        >
+          {stripEditorialMarkers(eyebrowText)}
+        </p>
+
         <h5
           style={{ color: palette.textPrimary }}
           className={
@@ -1237,26 +1458,25 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
               ? `${isLandscape ? 'text-[28px]' : isFixedRatio ? 'text-[34px]' : 'text-[28px] sm:text-[36px]'} font-urdu leading-[1.95] font-normal max-w-md`
               : scriptKind === 'arabic'
               ? `${isLandscape ? 'text-[26px]' : isFixedRatio ? 'text-[30px]' : 'text-[26px] sm:text-[32px]'} font-arabic leading-[1.9] font-bold max-w-md`
-              : `${isLandscape ? 'text-[28px]' : isFixedRatio ? 'text-[34px]' : 'text-[28px] sm:text-[36px]'} font-serif-display leading-[1.2] font-semibold tracking-tight max-w-md`
+              : `${isLandscape ? 'text-[28px]' : isFixedRatio ? 'text-[34px]' : 'text-[28px] sm:text-[36px]'} font-serif-display leading-[1.18] font-semibold tracking-tight max-w-md [text-wrap:balance]`
           }
         >
           {stripEditorialMarkers(headingText)}
         </h5>
 
-        {subheadingBlock && subheadingBlock.text && (
-          <p
-            style={{ color: palette.subheadingColor }}
-            className={
-              detectScriptKind(subheadingBlock.text, bookHasUrdu) === 'urdu'
-                ? `${isLandscape ? 'text-[18px]' : isFixedRatio ? 'text-[20px]' : 'text-[17px] sm:text-[20px]'} font-urdu leading-[2.0] max-w-sm`
-                : detectScriptKind(subheadingBlock.text, bookHasUrdu) === 'arabic'
-                ? `${isLandscape ? 'text-[16.5px]' : isFixedRatio ? 'text-[18px]' : 'text-[16px] sm:text-[18px]'} font-arabic font-bold leading-[1.85] max-w-sm`
-                : `${isFixedRatio ? 'text-[14px]' : 'text-[13px] sm:text-[14px]'} font-serif-body italic leading-relaxed max-w-sm`
-            }
-          >
-            {stripEditorialMarkers(subheadingBlock.text)}
-          </p>
-        )}
+        <p
+          dir={captionScript === 'latin' ? 'ltr' : 'rtl'}
+          style={{ color: palette.subheadingColor }}
+          className={
+            captionScript === 'urdu'
+              ? `${isLandscape ? 'text-[17px]' : isFixedRatio ? 'text-[19px]' : 'text-[16.5px] sm:text-[19px]'} font-urdu leading-[1.95] max-w-md line-clamp-2`
+              : captionScript === 'arabic'
+              ? `${isLandscape ? 'text-[15.5px]' : isFixedRatio ? 'text-[17.5px]' : 'text-[15.5px] sm:text-[17.5px]'} font-arabic font-semibold leading-[1.85] max-w-md line-clamp-2`
+              : `${isFixedRatio ? 'text-[13.5px]' : 'text-[13px] sm:text-[14px]'} font-serif-body italic leading-relaxed max-w-md line-clamp-2`
+          }
+        >
+          {stripEditorialMarkers(captionText)}
+        </p>
 
         <div
           style={{ backgroundColor: palette.border }}
@@ -1568,7 +1788,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
             Attach Book File to Load Literal Reading Text
           </h4>
           <p className="text-xs text-[#5E5043] leading-relaxed">
-            This saved BLC circle was created before literal text caching was enabled. Select the PDF/TXT file once to typeset Pages {session.startPage}–{session.endPage} into book-formatted reading folios and PNG cards.
+            This saved BLC circle does not have its literal book pages stored in the database yet. Select the PDF/TXT file once to typeset and save Pages {session.startPage}–{session.endPage} into book-formatted reading folios and PNG cards.
           </p>
         </div>
 
@@ -1655,7 +1875,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
             <h4 className="text-lg sm:text-xl font-serif-display font-bold text-[#2A1E17] mt-0.5 tabular-nums">
               Pages {session.startPage}–{session.endPage} ·{' '}
               {ratio !== 'auto'
-                ? `${parts.length} Adaptive Slides (${ratio})`
+                ? `${parts.length} Adaptive Folios (${ratio})`
                 : `${parts.length} Book Folios`}
             </h4>
           </div>
@@ -1700,7 +1920,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
               {isOrganizingAi && aiProgress
                 ? aiProgress
                 : hasLegacyEnglishTitlesOnUrdu
-                ? 'Click "Re-organize Like a Book" to refresh earlier cached page titles into Urdu script.'
+                ? 'Click "Re-organize Like a Book" to refresh earlier saved page titles into Urdu script.'
                 : 'Structures literal passages into book folios with dedicated full chapter title pages, language-matched titles, and Nastaliq / Serif typography.'}
             </p>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 pt-0.5">
@@ -1871,7 +2091,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
               ) : (
                 <>
                   <Download className="w-3.5 h-3.5 text-[#D4A373]" />
-                  <span>Download All {parts.length} {ratio !== 'auto' ? 'Slides' : 'Folios'} as PNGs</span>
+                  <span>Download All {parts.length} Folios as PNGs</span>
                 </>
               )}
             </button>
@@ -1914,7 +2134,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
 
               <div className="min-w-0 flex-1">
                 <span className="text-xs sm:text-sm font-serif-display font-bold text-[#2A1E17] tabular-nums block truncate">
-                  {ratio !== 'auto' ? 'Slide' : 'Folio'} {toRomanNumeral(activePart.partNumber)} of {toRomanNumeral(activePart.totalParts)}
+                  Folio {toRomanNumeral(activePart.partNumber)} of {toRomanNumeral(activePart.totalParts)}
                   {activePart.slideSplitTotal && activePart.slideSplitTotal > 1
                     ? ` · Part ${activePart.slideSplitIndex}/${activePart.slideSplitTotal}`
                     : ''}
@@ -1993,7 +2213,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                       ? 'bg-[#2A1E17] text-[#FBF7EE] border-[#2A1E17]'
                       : 'bg-[#FBF7EE] text-[#5E5043] border-[#D8C8B4] hover:border-[#8C5A2B]'
                   }`}
-                  title={chipTitle || `${ratio !== 'auto' ? 'Slide' : 'Folio'} ${toRomanNumeral(part.partNumber)}`}
+                  title={chipTitle || `Folio ${toRomanNumeral(part.partNumber)}`}
                 >
                   {toRomanNumeral(part.partNumber)}
                   {part.slideSplitTotal && part.slideSplitTotal > 1
@@ -2110,7 +2330,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                         </>
                       )}
 
-                      {/* 3-Column Book Folio Footer */}
+                      {/* Book Folio Footer */}
                       <div
                         style={{
                           borderColor: theme.border,
@@ -2118,7 +2338,11 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                         }}
                         className={`${
                           ratio === '16:9' ? 'pt-2 mt-2' : 'pt-3 mt-3'
-                        } border-t grid grid-cols-3 items-center gap-2 text-[10.5px] font-serif-body tabular-nums shrink-0`}
+                        } border-t ${
+                          activePart.isSessionCoverPage
+                            ? 'flex items-center justify-between gap-2'
+                            : 'grid grid-cols-3 items-center gap-2'
+                        } text-[10.5px] font-serif-body tabular-nums shrink-0`}
                       >
                         <span
                           style={{ color: theme.accent }}
@@ -2126,10 +2350,14 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                         >
                           The Wisdom Lounge
                         </span>
-                        <span className="truncate text-center font-medium">{plan.bookTitle}</span>
-                        <span className="text-right whitespace-nowrap">
-                          Session {session.sessionNumber} · Slide {toRomanNumeral(activePart.partNumber)} / {toRomanNumeral(activePart.totalParts)}
+                        <span className={`truncate font-medium ${activePart.isSessionCoverPage ? 'text-right' : 'text-center'}`}>
+                          {plan.bookTitle}
                         </span>
+                        {!activePart.isSessionCoverPage && (
+                          <span className="text-right whitespace-nowrap">
+                            Session {session.sessionNumber} · Folio {toRomanNumeral(activePart.partNumber)} / {toRomanNumeral(activePart.totalParts)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2208,7 +2436,7 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                           </>
                         )}
 
-                        {/* 3-Column Book Folio Footer */}
+                        {/* Book Folio Footer */}
                         <div
                           style={{
                             borderColor: theme.border,
@@ -2216,7 +2444,11 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                           }}
                           className={`${
                             ratio === '16:9' ? 'pt-2 mt-2' : 'pt-3 mt-3'
-                          } border-t grid grid-cols-3 items-center gap-2 text-[10.5px] font-serif-body tabular-nums shrink-0`}
+                          } border-t ${
+                            activePart.isSessionCoverPage
+                              ? 'flex items-center justify-between gap-2'
+                              : 'grid grid-cols-3 items-center gap-2'
+                          } text-[10.5px] font-serif-body tabular-nums shrink-0`}
                         >
                           <span
                             style={{ color: theme.accent }}
@@ -2224,10 +2456,14 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                           >
                             The Wisdom Lounge
                           </span>
-                          <span className="truncate text-center font-medium">{plan.bookTitle}</span>
-                          <span className="text-right whitespace-nowrap">
-                            Session {session.sessionNumber} · Slide {toRomanNumeral(activePart.partNumber)} / {toRomanNumeral(activePart.totalParts)}
+                          <span className={`truncate font-medium ${activePart.isSessionCoverPage ? 'text-right' : 'text-center'}`}>
+                            {plan.bookTitle}
                           </span>
+                          {!activePart.isSessionCoverPage && (
+                            <span className="text-right whitespace-nowrap">
+                              Session {session.sessionNumber} · Folio {toRomanNumeral(activePart.partNumber)} / {toRomanNumeral(activePart.totalParts)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2286,7 +2522,11 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                         borderColor: theme.border,
                         color: theme.textSecondary,
                       }}
-                      className="pt-3 mt-4 border-t flex flex-wrap sm:grid sm:grid-cols-3 items-center justify-between gap-x-2 gap-y-1 text-[9.5px] sm:text-[10.5px] font-serif-body tabular-nums"
+                      className={`pt-3 mt-4 border-t ${
+                        activePart.isSessionCoverPage
+                          ? 'flex items-center justify-between gap-2'
+                          : 'flex flex-wrap sm:grid sm:grid-cols-3 items-center justify-between gap-x-2 gap-y-1'
+                      } text-[9.5px] sm:text-[10.5px] font-serif-body tabular-nums`}
                     >
                       <span
                         style={{ color: theme.accent }}
@@ -2294,10 +2534,20 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                       >
                         The Wisdom Lounge
                       </span>
-                      <span className="truncate text-center font-medium max-w-[140px] sm:max-w-none">{plan.bookTitle}</span>
-                      <span className="text-right whitespace-nowrap">
-                        Session {session.sessionNumber} · Folio {toRomanNumeral(activePart.partNumber)} / {toRomanNumeral(activePart.totalParts)}
+                      <span
+                        className={`truncate font-medium ${
+                          activePart.isSessionCoverPage
+                            ? 'text-right max-w-[180px] sm:max-w-none'
+                            : 'text-center max-w-[140px] sm:max-w-none'
+                        }`}
+                      >
+                        {plan.bookTitle}
                       </span>
+                      {!activePart.isSessionCoverPage && (
+                        <span className="text-right whitespace-nowrap">
+                          Session {session.sessionNumber} · Folio {toRomanNumeral(activePart.partNumber)} / {toRomanNumeral(activePart.totalParts)}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2445,21 +2695,35 @@ export const BlcLiteralReaderPanel: React.FC<BlcLiteralReaderPanelProps> = ({
                     </>
                   )}
 
-                  {/* Minimal 3-Column Book Folio Footer */}
+                  {/* Minimal Book Folio Footer */}
                   <div
                     style={{
                       borderColor: theme.border,
                       color: theme.textSecondary,
                     }}
-                    className="pt-3 border-t flex flex-wrap sm:grid sm:grid-cols-3 items-center justify-between gap-x-2 gap-y-1 text-[10px] sm:text-[11px] font-serif-body tabular-nums"
+                    className={`pt-3 border-t ${
+                      part.isSessionCoverPage
+                        ? 'flex items-center justify-between gap-2'
+                        : 'flex flex-wrap sm:grid sm:grid-cols-3 items-center justify-between gap-x-2 gap-y-1'
+                    } text-[10px] sm:text-[11px] font-serif-body tabular-nums`}
                   >
                     <span style={{ color: theme.accent }} className="text-left font-semibold whitespace-nowrap">
                       The Wisdom Lounge
                     </span>
-                    <span className="truncate text-center font-medium max-w-[140px] sm:max-w-none">{plan.bookTitle}</span>
-                    <span className="text-right whitespace-nowrap">
-                      Session {session.sessionNumber} · Folio {toRomanNumeral(part.partNumber)} / {toRomanNumeral(part.totalParts)}
+                    <span
+                      className={`truncate font-medium ${
+                        part.isSessionCoverPage
+                          ? 'text-right max-w-[180px] sm:max-w-none'
+                          : 'text-center max-w-[140px] sm:max-w-none'
+                      }`}
+                    >
+                      {plan.bookTitle}
                     </span>
+                    {!part.isSessionCoverPage && (
+                      <span className="text-right whitespace-nowrap">
+                        Session {session.sessionNumber} · Folio {toRomanNumeral(part.partNumber)} / {toRomanNumeral(part.totalParts)}
+                      </span>
+                    )}
                   </div>
                 </div>
               </article>

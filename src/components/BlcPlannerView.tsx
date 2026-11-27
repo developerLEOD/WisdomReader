@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircle,
   BookMarked,
@@ -13,7 +13,7 @@ import {
 import { BlcLiteralPartSize, BlcPlan } from '../types/blc';
 import { BlcSetupWizard } from './BlcSetupWizard';
 import { BlcSessionDashboard } from './BlcSessionDashboard';
-import { deleteBlcBookPages } from '../utils/blcLiteralStorage';
+import { clearLegacyLocalBlcCache, deleteBlcBookPages } from '../utils/blcLiteralStorage';
 import {
   buildFirestoreErrorInfo,
   db,
@@ -24,57 +24,31 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDocs,
+  getDocsFromServer,
   onSnapshot,
   setDoc,
 } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 
-const BLC_STORAGE_KEY = 'wisdom_reader_blc_plans';
-
-function readLocalPlans(): BlcPlan[] {
-  try {
-    const saved = localStorage.getItem(BLC_STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        return parsed.filter(p => p && typeof p.id === 'string');
-      }
-    }
-  } catch (e) {
-    console.warn('Could not load saved BLC plans from localStorage:', e);
-  }
-  return [];
-}
-
-function mergePlans(cloudPlans: BlcPlan[], localPlans: BlcPlan[]): BlcPlan[] {
-  const byId = new Map<string, BlcPlan>();
-  for (const lp of localPlans) {
-    byId.set(lp.id, lp);
-  }
-  for (const cp of cloudPlans) {
-    const existing = byId.get(cp.id);
-    if (!existing || (cp.updatedAt || cp.createdAt || 0) >= (existing.updatedAt || existing.createdAt || 0)) {
-      byId.set(cp.id, cp);
-    }
-  }
-  return Array.from(byId.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+function sortPlansNewestFirst(list: BlcPlan[]): BlcPlan[] {
+  return [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
 export const BlcPlannerView: React.FC = () => {
   const { user, authReady, isSigningIn, authError, isBlcAuthorized, signInWithGoogle, signOutUser } =
     useAuth();
 
-  const [plans, setPlans] = useState<BlcPlan[]>(() => readLocalPlans());
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(() => {
-    const local = readLocalPlans();
-    return local.length > 0 ? local[0].id : null;
-  });
+  const [plans, setPlans] = useState<BlcPlan[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
   const [isCreatingNew, setIsCreatingNew] = useState<boolean>(false);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
+  const [hasLoadedCloudOnce, setHasLoadedCloudOnce] = useState<boolean>(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
-  const syncedLocalIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    clearLegacyLocalBlcCache();
+  }, []);
 
   const persistPlanToCloud = useCallback(
     async (plan: BlcPlan) => {
@@ -100,7 +74,7 @@ export const BlcPlannerView: React.FC = () => {
     setIsSyncingCloud(true);
     setCloudError(null);
     try {
-      const snapshot = await getDocs(collection(db, 'blcPlans'));
+      const snapshot = await getDocsFromServer(collection(db, 'blcPlans'));
       const cloudPlans: BlcPlan[] = [];
       snapshot.forEach(d => {
         const data = d.data() as BlcPlan;
@@ -108,35 +82,33 @@ export const BlcPlannerView: React.FC = () => {
           cloudPlans.push(data);
         }
       });
-      setPlans(prevLocal => {
-        const merged = mergePlans(cloudPlans, prevLocal);
-        try {
-          localStorage.setItem(BLC_STORAGE_KEY, JSON.stringify(merged));
-        } catch {
-          // ignore
-        }
-        return merged;
-      });
+      const sorted = sortPlansNewestFirst(cloudPlans);
+      setPlans(sorted);
       setSelectedPlanId(prev => {
-        if (prev && cloudPlans.some(p => p.id === prev)) return prev;
-        return cloudPlans[0]?.id || prev;
+        if (prev && sorted.some(p => p.id === prev)) return prev;
+        return sorted[0]?.id || null;
       });
     } catch (err: any) {
       const info = buildFirestoreErrorInfo(err, OperationType.LIST, 'blcPlans');
       console.error('Firestore Error: ', JSON.stringify(info));
       setCloudError(err?.message || 'Could not fetch saved BLCs from Firebase.');
     } finally {
+      setHasLoadedCloudOnce(true);
       setIsSyncingCloud(false);
     }
   }, [user, isBlcAuthorized]);
 
-  // Real-time Firestore listener bound strictly to authorized Firebase Auth session
+  // Real-time Firestore listener bound strictly to authorized Firebase Auth session (database-only)
   useEffect(() => {
     if (!authReady || !user || !isBlcAuthorized) {
+      setPlans([]);
+      setSelectedPlanId(null);
+      setHasLoadedCloudOnce(false);
       setIsSyncingCloud(false);
       return;
     }
 
+    clearLegacyLocalBlcCache();
     setIsSyncingCloud(true);
     setCloudError(null);
 
@@ -145,39 +117,19 @@ export const BlcPlannerView: React.FC = () => {
       plansCol,
       snapshot => {
         const cloudPlans: BlcPlan[] = [];
-        const cloudIds = new Set<string>();
         snapshot.forEach(d => {
           const data = d.data() as BlcPlan;
-          if (data && data.id) {
-            cloudIds.add(data.id);
-            if (!data.userId || data.userId === user.uid) {
-              cloudPlans.push(data);
-            }
+          if (data && data.id && (!data.userId || data.userId === user.uid)) {
+            cloudPlans.push(data);
           }
         });
 
-        const localSnapshot = readLocalPlans();
-        const merged = mergePlans(cloudPlans, localSnapshot);
-
-        // Push any local-only BLC plans up to Firestore once authenticated
-        for (const lp of localSnapshot) {
-          if (!cloudIds.has(lp.id) && !syncedLocalIdsRef.current.has(lp.id)) {
-            syncedLocalIdsRef.current.add(lp.id);
-            void persistPlanToCloud(lp);
-          }
-        }
-
-        setPlans(merged);
-        if (merged.length > 0) {
-          setSelectedPlanId(prev =>
-            prev && merged.some(p => p.id === prev) ? prev : merged[0].id
-          );
-        }
-        try {
-          localStorage.setItem(BLC_STORAGE_KEY, JSON.stringify(merged));
-        } catch {
-          // ignore
-        }
+        const sorted = sortPlansNewestFirst(cloudPlans);
+        setPlans(sorted);
+        setSelectedPlanId(prev =>
+          prev && sorted.some(p => p.id === prev) ? prev : sorted[0]?.id || null
+        );
+        setHasLoadedCloudOnce(true);
         setIsSyncingCloud(false);
       },
       error => {
@@ -186,23 +138,13 @@ export const BlcPlannerView: React.FC = () => {
         setCloudError(
           error.message || 'Missing permission or connectivity error loading saved BLCs.'
         );
+        setHasLoadedCloudOnce(true);
         setIsSyncingCloud(false);
       }
     );
 
     return () => unsubscribe();
-  }, [authReady, user, isBlcAuthorized, persistPlanToCloud]);
-
-  // Persist local cache whenever plans state updates
-  useEffect(() => {
-    if (isBlcAuthorized) {
-      try {
-        localStorage.setItem(BLC_STORAGE_KEY, JSON.stringify(plans));
-      } catch (e) {
-        console.warn('Could not save BLC plans to localStorage:', e);
-      }
-    }
-  }, [plans, isBlcAuthorized]);
+  }, [authReady, user, isBlcAuthorized]);
 
   const activePlan = plans.find(p => p.id === selectedPlanId) || plans[0] || null;
 
@@ -443,6 +385,17 @@ export const BlcPlannerView: React.FC = () => {
       </div>
     );
   };
+
+  if ((!hasLoadedCloudOnce || isSyncingCloud) && plans.length === 0 && !isCreatingNew && !cloudError) {
+    return (
+      <div className="max-w-md mx-auto my-16 p-8 bg-[#FBF7EE] border border-[#E2D4C3] rounded-2xl text-center space-y-4 shadow-sm">
+        <Loader2 className="w-8 h-8 text-[#8C5A2B] animate-spin mx-auto" />
+        <p className="text-sm font-sans-ui text-[#5E5043]">
+          Loading your saved Book Learning Circles from database...
+        </p>
+      </div>
+    );
+  }
 
   if (isCreatingNew || !activePlan) {
     return (

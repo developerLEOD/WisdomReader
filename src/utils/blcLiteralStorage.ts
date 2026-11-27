@@ -7,137 +7,173 @@ import {
   sanitizeForFirestore,
 } from '../lib/firebase';
 import { isAuthorizedBlcEmail } from '../lib/authConfig';
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocFromServer,
+  getDocs,
+  query,
+  setDoc,
+  where,
+} from 'firebase/firestore';
 
-const DB_NAME = 'wisdom_reader_blc_db';
-const DB_VERSION = 2;
-const PAGES_STORE = 'book_pages';
-const FORMATTED_STORE = 'formatted_sessions';
+const LEGACY_IDB_NAME = 'wisdom_reader_blc_db';
+const LEGACY_BLC_LOCAL_STORAGE_KEY = 'wisdom_reader_blc_plans';
+const MAX_FIRESTORE_CHUNK_BYTES = 600_000;
 
-interface StoredBookPagesRecord {
-  planId: string;
-  pages: ParsedPage[];
-  savedAt: number;
-}
+let legacyCacheCleared = false;
 
-interface StoredFormattedSessionRecord {
-  key: string;
-  planId: string;
-  sessionNumber: number;
-  partSize: BlcLiteralPartSize;
-  parts: BlcLiteralReadingPart[];
-  savedAt: number;
-}
+/**
+ * Purges any legacy localStorage / IndexedDB BLC caches so BLCs live strictly in Firestore.
+ */
+export function clearLegacyLocalBlcCache(): void {
+  if (legacyCacheCleared || typeof window === 'undefined') return;
+  legacyCacheCleared = true;
 
-function openBlcDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
-      reject(new Error('IndexedDB is not available in this browser.'));
-      return;
+  try {
+    window.localStorage?.removeItem(LEGACY_BLC_LOCAL_STORAGE_KEY);
+  } catch {
+    // ignore storage access issues
+  }
+
+  try {
+    if (typeof window.indexedDB !== 'undefined') {
+      window.indexedDB.deleteDatabase(LEGACY_IDB_NAME);
     }
+  } catch {
+    // ignore indexedDB deletion issues
+  }
+}
 
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+function assertAuthorizedDbAccess(): void {
+  if (!auth.currentUser || !isAuthorizedBlcEmail(auth.currentUser.email)) {
+    throw new Error('Sign in with an authorized Google account to access the BLC database.');
+  }
+}
 
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(PAGES_STORE)) {
-        db.createObjectStore(PAGES_STORE, { keyPath: 'planId' });
-      }
-      if (!db.objectStoreNames.contains(FORMATTED_STORE)) {
-        const store = db.createObjectStore(FORMATTED_STORE, { keyPath: 'key' });
-        store.createIndex('by_plan', 'planId', { unique: false });
-      }
-    };
+function splitPagesIntoChunks(pages: ParsedPage[]): ParsedPage[][] {
+  const chunks: ParsedPage[][] = [];
+  let current: ParsedPage[] = [];
+  let currentBytes = 0;
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('Failed to open BLC storage database.'));
-  });
+  for (const page of pages) {
+    const pageBytes = JSON.stringify(page).length;
+    if (current.length > 0 && currentBytes + pageBytes > MAX_FIRESTORE_CHUNK_BYTES) {
+      chunks.push(current);
+      current = [page];
+      currentBytes = pageBytes;
+    } else {
+      current.push(page);
+      currentBytes += pageBytes;
+    }
+  }
+
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+
+  return chunks;
 }
 
 export async function saveBlcBookPages(planId: string, pages: ParsedPage[]): Promise<void> {
-  try {
-    const dbInstance = await openBlcDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = dbInstance.transaction(PAGES_STORE, 'readwrite');
-      const store = tx.objectStore(PAGES_STORE);
-      const record: StoredBookPagesRecord = {
-        planId,
-        pages,
-        savedAt: Date.now(),
-      };
-      store.put(record);
-      tx.oncomplete = () => {
-        dbInstance.close();
-        resolve();
-      };
-      tx.onerror = () => {
-        dbInstance.close();
-        reject(tx.error || new Error('Failed to save literal book pages.'));
-      };
-    });
-  } catch (err) {
-    console.warn('Could not persist BLC literal book pages to IDB:', err);
-  }
+  clearLegacyLocalBlcCache();
+  assertAuthorizedDbAccess();
 
-  // Sync to Firestore only when authenticated (rules require request.auth != null)
-  if (auth.currentUser && isAuthorizedBlcEmail(auth.currentUser.email)) {
-    try {
-      const cacheRef = doc(db, 'blcCachedPages', planId);
-      await setDoc(cacheRef, sanitizeForFirestore({
-        id: planId,
-        planId,
-        pages,
-        updatedAt: Date.now(),
-      }), { merge: true });
-    } catch (err) {
-      console.warn(
-        'Could not sync pages to Firestore:',
-        JSON.stringify(buildFirestoreErrorInfo(err, OperationType.WRITE, `blcCachedPages/${planId}`))
+  const updatedAt = Date.now();
+  const totalBytes = JSON.stringify(pages).length;
+
+  try {
+    const mainRef = doc(db, 'blcCachedPages', planId);
+
+    if (totalBytes <= MAX_FIRESTORE_CHUNK_BYTES) {
+      await setDoc(
+        mainRef,
+        sanitizeForFirestore({
+          id: planId,
+          planId,
+          pages,
+          chunkIds: [],
+          updatedAt,
+        }),
+        { merge: true }
+      );
+      return;
+    }
+
+    // Large books exceed Firestore's 1 MB document limit: split cleanly across chunk docs
+    const pageChunks = splitPagesIntoChunks(pages);
+    const chunkIds: string[] = [];
+
+    for (let i = 0; i < pageChunks.length; i++) {
+      const chunkId = `${planId}__chunk_${i}`;
+      chunkIds.push(chunkId);
+      await setDoc(
+        doc(db, 'blcCachedPages', chunkId),
+        sanitizeForFirestore({
+          id: chunkId,
+          planId,
+          chunkIndex: i,
+          pages: pageChunks[i],
+          updatedAt,
+        })
       );
     }
+
+    await setDoc(
+      mainRef,
+      sanitizeForFirestore({
+        id: planId,
+        planId,
+        pages: [],
+        chunkIds,
+        updatedAt,
+      })
+    );
+  } catch (err) {
+    const info = buildFirestoreErrorInfo(err, OperationType.WRITE, `blcCachedPages/${planId}`);
+    console.error('Firestore Error:', JSON.stringify(info));
+    throw err;
   }
 }
 
 export async function loadBlcBookPages(planId: string): Promise<ParsedPage[] | null> {
-  // Try Firestore first when authenticated
-  if (auth.currentUser && isAuthorizedBlcEmail(auth.currentUser.email)) {
-    try {
-      const cacheRef = doc(db, 'blcCachedPages', planId);
-      const snap = await getDoc(cacheRef);
-      if (snap.exists() && snap.data()?.pages) {
-        const pages = snap.data().pages as ParsedPage[];
-        if (Array.isArray(pages) && pages.length > 0) {
-          return pages;
-        }
-      }
-    } catch (err) {
-      console.warn(
-        'Could not load pages from Firestore, trying IDB:',
-        JSON.stringify(buildFirestoreErrorInfo(err, OperationType.GET, `blcCachedPages/${planId}`))
-      );
-    }
+  clearLegacyLocalBlcCache();
+
+  if (!auth.currentUser || !isAuthorizedBlcEmail(auth.currentUser.email)) {
+    return null;
   }
 
-  // Fallback to IndexedDB
   try {
-    const dbInstance = await openBlcDb();
-    return await new Promise<ParsedPage[] | null>((resolve, reject) => {
-      const tx = dbInstance.transaction(PAGES_STORE, 'readonly');
-      const store = tx.objectStore(PAGES_STORE);
-      const req = store.get(planId);
-      req.onsuccess = () => {
-        dbInstance.close();
-        const result = req.result as StoredBookPagesRecord | undefined;
-        resolve(result?.pages && Array.isArray(result.pages) ? result.pages : null);
-      };
-      req.onerror = () => {
-        dbInstance.close();
-        reject(req.error);
-      };
-    });
+    const cacheRef = doc(db, 'blcCachedPages', planId);
+    const snap = await getDocFromServer(cacheRef);
+    if (!snap.exists()) {
+      return null;
+    }
+
+    const data = snap.data();
+    const chunkIds = Array.isArray(data?.chunkIds) ? (data.chunkIds as string[]) : [];
+
+    if (chunkIds.length > 0) {
+      const combinedPages: ParsedPage[] = [];
+      for (const chunkId of chunkIds) {
+        const chunkSnap = await getDocFromServer(doc(db, 'blcCachedPages', chunkId));
+        if (chunkSnap.exists()) {
+          const chunkPages = chunkSnap.data()?.pages;
+          if (Array.isArray(chunkPages)) {
+            combinedPages.push(...(chunkPages as ParsedPage[]));
+          }
+        }
+      }
+      return combinedPages.length > 0 ? combinedPages : null;
+    }
+
+    const pages = data?.pages as ParsedPage[] | undefined;
+    return Array.isArray(pages) && pages.length > 0 ? pages : null;
   } catch (err) {
-    console.warn('Could not load BLC literal book pages:', err);
-    return null;
+    const info = buildFirestoreErrorInfo(err, OperationType.GET, `blcCachedPages/${planId}`);
+    console.error('Firestore Error:', JSON.stringify(info));
+    throw err;
   }
 }
 
@@ -151,52 +187,28 @@ export async function saveFormattedSessionParts(
   partSize: BlcLiteralPartSize,
   parts: BlcLiteralReadingPart[]
 ): Promise<void> {
+  clearLegacyLocalBlcCache();
+  assertAuthorizedDbAccess();
+
   const key = makeFormattedKey(planId, sessionNumber);
   try {
-    const dbInstance = await openBlcDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = dbInstance.transaction(FORMATTED_STORE, 'readwrite');
-      const store = tx.objectStore(FORMATTED_STORE);
-      const record: StoredFormattedSessionRecord = {
-        key,
-        planId,
-        sessionNumber,
-        partSize,
-        parts,
-        savedAt: Date.now(),
-      };
-      store.put(record);
-      tx.oncomplete = () => {
-        dbInstance.close();
-        resolve();
-      };
-      tx.onerror = () => {
-        dbInstance.close();
-        reject(tx.error || new Error('Failed to save contextually formatted session parts.'));
-      };
-    });
-  } catch (err) {
-    console.warn('Could not save formatted session parts to IDB:', err);
-  }
-
-  // Sync to Firestore when authenticated
-  if (auth.currentUser && isAuthorizedBlcEmail(auth.currentUser.email)) {
-    try {
-      const cacheRef = doc(db, 'blcCachedPages', key);
-      await setDoc(cacheRef, sanitizeForFirestore({
+    const cacheRef = doc(db, 'blcCachedPages', key);
+    await setDoc(
+      cacheRef,
+      sanitizeForFirestore({
         id: key,
         planId,
         sessionNumber,
         partSize,
         parts,
         updatedAt: Date.now(),
-      }), { merge: true });
-    } catch (err) {
-      console.warn(
-        'Could not sync formatted parts to Firestore:',
-        JSON.stringify(buildFirestoreErrorInfo(err, OperationType.WRITE, `blcCachedPages/${key}`))
-      );
-    }
+      }),
+      { merge: true }
+    );
+  } catch (err) {
+    const info = buildFirestoreErrorInfo(err, OperationType.WRITE, `blcCachedPages/${key}`);
+    console.error('Firestore Error:', JSON.stringify(info));
+    throw err;
   }
 }
 
@@ -204,94 +216,52 @@ export async function loadFormattedSessionParts(
   planId: string,
   sessionNumber: number
 ): Promise<{ partSize: BlcLiteralPartSize; parts: BlcLiteralReadingPart[] } | null> {
-  const key = makeFormattedKey(planId, sessionNumber);
-  // Try Firestore first when authenticated
-  if (auth.currentUser && isAuthorizedBlcEmail(auth.currentUser.email)) {
-    try {
-      const cacheRef = doc(db, 'blcCachedPages', key);
-      const snap = await getDoc(cacheRef);
-      if (snap.exists() && snap.data()?.parts) {
-        const data = snap.data();
-        if (Array.isArray(data.parts) && data.parts.length > 0) {
-          return { partSize: data.partSize || 'standard', parts: data.parts };
-        }
-      }
-    } catch (err) {
-      console.warn(
-        'Could not load formatted parts from Firestore, trying IDB:',
-        JSON.stringify(buildFirestoreErrorInfo(err, OperationType.GET, `blcCachedPages/${key}`))
-      );
-    }
+  clearLegacyLocalBlcCache();
+
+  if (!auth.currentUser || !isAuthorizedBlcEmail(auth.currentUser.email)) {
+    return null;
   }
 
-  // Fallback to IndexedDB
+  const key = makeFormattedKey(planId, sessionNumber);
   try {
-    const dbInstance = await openBlcDb();
-    return await new Promise<{ partSize: BlcLiteralPartSize; parts: BlcLiteralReadingPart[] } | null>(
-      (resolve, reject) => {
-        const tx = dbInstance.transaction(FORMATTED_STORE, 'readonly');
-        const store = tx.objectStore(FORMATTED_STORE);
-        const req = store.get(key);
-        req.onsuccess = () => {
-          dbInstance.close();
-          const result = req.result as StoredFormattedSessionRecord | undefined;
-          if (result?.parts && Array.isArray(result.parts) && result.parts.length > 0) {
-            resolve({ partSize: result.partSize, parts: result.parts });
-          } else {
-            resolve(null);
-          }
-        };
-        req.onerror = () => {
-          dbInstance.close();
-          reject(req.error);
-        };
+    const cacheRef = doc(db, 'blcCachedPages', key);
+    const snap = await getDocFromServer(cacheRef);
+    if (snap.exists() && snap.data()?.parts) {
+      const data = snap.data();
+      if (Array.isArray(data.parts) && data.parts.length > 0) {
+        return { partSize: data.partSize || 'standard', parts: data.parts };
       }
-    );
+    }
+    return null;
   } catch (err) {
-    console.warn('Could not load formatted session parts:', err);
+    const info = buildFirestoreErrorInfo(err, OperationType.GET, `blcCachedPages/${key}`);
+    console.error('Firestore Error:', JSON.stringify(info));
     return null;
   }
 }
 
 export async function deleteBlcBookPages(planId: string): Promise<void> {
-  try {
-    const dbInstance = await openBlcDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = dbInstance.transaction([PAGES_STORE, FORMATTED_STORE], 'readwrite');
-      tx.objectStore(PAGES_STORE).delete(planId);
+  clearLegacyLocalBlcCache();
 
-      const formattedStore = tx.objectStore(FORMATTED_STORE);
-      const index = formattedStore.index('by_plan');
-      const cursorReq = index.openCursor(IDBKeyRange.only(planId));
-      cursorReq.onsuccess = () => {
-        const cursor = cursorReq.result;
-        if (cursor) {
-          cursor.delete();
-          cursor.continue();
-        }
-      };
-
-      tx.oncomplete = () => {
-        dbInstance.close();
-        resolve();
-      };
-      tx.onerror = () => {
-        dbInstance.close();
-        reject(tx.error);
-      };
-    });
-  } catch (err) {
-    console.warn('Could not delete BLC literal book pages:', err);
+  if (!auth.currentUser || !isAuthorizedBlcEmail(auth.currentUser.email)) {
+    return;
   }
 
-  if (auth.currentUser && isAuthorizedBlcEmail(auth.currentUser.email)) {
-    try {
-      await deleteDoc(doc(db, 'blcCachedPages', planId));
-    } catch (err) {
-      console.warn(
-        'Could not delete cached pages from Firestore:',
-        JSON.stringify(buildFirestoreErrorInfo(err, OperationType.DELETE, `blcCachedPages/${planId}`))
-      );
+  try {
+    const relatedQuery = query(
+      collection(db, 'blcCachedPages'),
+      where('planId', '==', planId)
+    );
+    const relatedSnap = await getDocs(relatedQuery);
+    const deletePromises = relatedSnap.docs.map(d => deleteDoc(d.ref));
+
+    if (!relatedSnap.docs.some(d => d.id === planId)) {
+      deletePromises.push(deleteDoc(doc(db, 'blcCachedPages', planId)));
     }
+
+    await Promise.all(deletePromises);
+  } catch (err) {
+    const info = buildFirestoreErrorInfo(err, OperationType.DELETE, `blcCachedPages/${planId}`);
+    console.error('Firestore Error:', JSON.stringify(info));
   }
 }

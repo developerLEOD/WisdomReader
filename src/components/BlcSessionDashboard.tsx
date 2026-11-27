@@ -66,7 +66,7 @@ export const BlcSessionDashboard: React.FC<BlcSessionDashboardProps> = ({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mobileRoadmapOpen, setMobileRoadmapOpen] = useState(false);
 
-  // Load cached literal pages from IndexedDB whenever plan changes
+  // Load literal book pages from Firestore database whenever plan changes
   useEffect(() => {
     let cancelled = false;
     setIsLoadingPages(true);
