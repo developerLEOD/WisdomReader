@@ -372,7 +372,7 @@ export function paginatePartsToCanvasBoundary(options: {
   footer.innerHTML = `
     <span class="text-left font-semibold tracking-wide whitespace-nowrap">The Wisdom Lounge</span>
     <span class="truncate text-center font-medium"></span>
-    <span class="text-right whitespace-nowrap">Session ${sessionNumber} · Slide 99 / 99</span>
+    <span class="text-right whitespace-nowrap">Folio ${sessionNumber} · Slide 99 / 99</span>
   `;
   (footer.children[1] as HTMLElement).textContent = bookTitle;
 
